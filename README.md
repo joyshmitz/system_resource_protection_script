@@ -100,6 +100,17 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_p
 
 ---
 
+## ⚡ TL;DR (Why You’d Use This)
+
+- Keeps your desktop/dev box responsive under heavy loads by automatically de-prioritizing hogs (compilers, browsers, IDEs, containers) and protecting critical apps (WM, terminal, SSH).
+- Prevents painful OOM lockups: EarlyOOM is tuned to kill the right things first, and SRPS warns about overlaps (systemd-oomd) so you avoid double-kills.
+- Safe defaults but fully configurable: toggle components, override EarlyOOM, and dry-run (`--plan`) to preview changes.
+- Restores cleanly: backups for key configs, uninstall path, and clearly marked helper scripts.
+- Visibility and control: live monitors, throttling checks, rule reloads, diagnostics (`srps-doctor`), and HTML snapshots—no resident daemons added.
+- Works on Debian/Ubuntu and WSL2, with laptop-aware defaults and WSL/systemd helpers.
+
+---
+
 ## 📋 Requirements
 
 | Requirement | Description | Status |
