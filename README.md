@@ -55,8 +55,8 @@ Recommended (with integrity check):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/verify.sh -o verify.sh
 bash verify.sh latest          # downloads release install.sh + checksum and verifies
-bash install.sh --plan         # preview
-bash install.sh                # apply
+./install.sh --plan            # preview (dry-run)
+./install.sh --install         # apply (or just ./install.sh)
 ```
 
 Quick (no verification):
@@ -87,13 +87,14 @@ The script performs **6 steps**:
 To undo SRPS configuration and restore backups where possible:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh -o install.sh
+bash install.sh --uninstall
 ```
 
 **Non-interactive uninstall:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh | bash -s -- --uninstall --yes
+bash install.sh --uninstall --yes
 ```
 
 ---
@@ -187,7 +188,7 @@ docker run --rm -it --privileged -v /:/host srps-tools --plan
 
 ### ⚙️ Configuration & Feature Flags
 
-- Optional config file: `./srps.conf` (next to script) **or** `/etc/system-resource-protection.conf`.
+- Optional config file: `./srps.conf` (next to script), `/etc/system-resource-protection.conf`, or specify via `-c /path/to/config`.
 - Toggle modules (1=enable, 0=disable): `ENABLE_ANANICY`, `ENABLE_EARLYOOM`, `ENABLE_SYSCTL`, `ENABLE_WSL_LIMITS`, `ENABLE_TOOLS`, `ENABLE_SHELL_ALIASES`, `ENABLE_RULE_PULL`, `ENABLE_HTML_REPORT`.
 - Override EarlyOOM: `SRPS_EARLYOOM_ARGS="..."` (single line; safely escaped on write).
 - Plan-only mode: `install.sh --plan` or `DRY_RUN=1` to preview without making changes.

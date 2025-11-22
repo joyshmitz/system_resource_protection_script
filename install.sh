@@ -75,69 +75,94 @@ die() {
 }
 
 usage() {
-    cat <<EOF
-System Resource Protection Script
+    cat <<'EOF'
+System Resource Protection Script (SRPS)
 
 Usage:
-  install.sh                Install / update protection
-  install.sh --install      Same as above
-  install.sh --uninstall    Remove protection and restore backups where possible
-  install.sh --uninstall -y Non-interactive uninstall
-  install.sh --plan         Show what would be changed (dry run)
+  bash install.sh [ACTION] [OPTIONS]
 
-Examples:
-  curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh | bash -s -- --uninstall
+Actions (mutually exclusive; default is --install):
+  --install        Perform installation (default)
+  --plan           Dry-run only: show what would change, make no modifications
+  --uninstall      Revert SRPS configuration and restore backups where possible
+
+Options:
+  -y, --yes        Non-interactive uninstall (assume "yes")
+  -c, --config PATH
+                   Override path to srps.conf
+  -h, --help       Show this help and exit
+
+You can also use ENABLE_* and SRPS_* environment variables to tweak behaviour.
 EOF
 }
 
 print_banner() {
     local mode="$1"
+    local label
+
+    case "$mode" in
+        install)
+            if [ "${DRY_RUN:-0}" -eq 1 ]; then
+                label="PLAN"
+            else
+                label="INSTALL"
+            fi
+            ;;
+        uninstall)
+            label="UNINSTALL"
+            ;;
+        *)
+            label="$mode"
+            ;;
+    esac
+
     if [ -t 1 ]; then
         clear
     fi
 
     echo -e "${MAGENTA}${BOLD}"
     echo "╔════════════════════════════════════════════════════════════╗"
-    if [ "$mode" = "install" ]; then
-        echo "║      SYSTEM RESOURCE PROTECTION SETUP (SRPS)              ║"
-        echo "║   Taming runaway dev processes & desktop resource hogs    ║"
-    else
-        echo "║      SYSTEM RESOURCE PROTECTION UNINSTALLER (SRPS)        ║"
-        echo "║        Restoring your system to its previous state        ║"
-    fi
+    echo "║   SYSTEM RESOURCE PROTECTION SCRIPT (SRPS)                 ║"
+    printf "║   %-56s ║\n" "Mode: $label"
     echo "╚════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
-# --------------- Argument Parsing ----------------------------
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --install)
-            ACTION="install"
-            ;;
-        --uninstall)
-            ACTION="uninstall"
-            ;;
-        --plan)
-            ACTION="plan"
-            DRY_RUN=1
-            ;;
-        -y|--yes)
-            FORCE="yes"
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            print_error "Unknown argument: $1"
-            usage
-            exit 1
-            ;;
-    esac
-    shift
-done
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --plan)
+                ACTION="plan"
+                DRY_RUN=1
+                ;;
+            --install)
+                ACTION="install"
+                DRY_RUN=0
+                ;;
+            --uninstall|--remove)
+                ACTION="uninstall"
+                ;;
+            -y|--yes)
+                FORCE="yes"
+                ;;
+            -c|--config)
+                if [ "$#" -lt 2 ]; then
+                    die "--config requires a path argument"
+                fi
+                shift
+                CONFIG_FILE="$1"
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Unknown option: $1 (see --help)"
+                ;;
+        esac
+        shift
+    done
+}
 
 # --------------- System Detection ----------------------------
 detect_system() {
@@ -315,6 +340,21 @@ configure_ananicy_rules() {
         return
     fi
 
+    # Download community rules FIRST to a temp dir to ensure we have them before wiping
+    local tmp_rules_dir
+    tmp_rules_dir=$(mktemp -d)
+    # Trap to clean up tmp dir on return/exit, but we might mv it, so we handle cleanup manually
+    
+    print_info "Fetching community Ananicy rules (CachyOS)..."
+    local fetch_success=0
+    if retry_cmd "git clone -q --depth 1 https://github.com/CachyOS/ananicy-rules.git $tmp_rules_dir" 3; then
+        fetch_success=1
+    else
+        print_warning "Failed to clone community rules. Proceeding with SRPS custom rules only."
+        rm -rf "$tmp_rules_dir"
+    fi
+
+    # Now we touch the system config
     if [ -d /etc/ananicy.d ]; then
         if sudo test -f /etc/ananicy.d/.srps_backup 2>/dev/null; then
             backup_dir="$(sudo cat /etc/ananicy.d/.srps_backup 2>/dev/null | head -n1 || echo "")"
@@ -327,18 +367,18 @@ configure_ananicy_rules() {
         sudo rm -rf /etc/ananicy.d
     fi
 
-    sudo mkdir -p /etc/ananicy.d/{00-cgroups,00-types,00-default}
-    (
-        cd /etc/ananicy.d
-        print_info "Fetching community Ananicy rules (CachyOS)..."
-        if ! retry_cmd "sudo git clone -q --depth 1 https://github.com/CachyOS/ananicy-rules.git temp_rules" 3; then
-            print_warning "Failed to clone community rules; proceeding with SRPS custom rules only."
-        fi
-        if [ -d temp_rules ]; then
-            sudo mv temp_rules/* . 2>/dev/null || true
-            sudo rm -rf temp_rules
-        fi
-    )
+    sudo mkdir -p /etc/ananicy.d
+    
+    if [ "$fetch_success" -eq 1 ]; then
+        # Move fetched rules into place (using /. to include hidden files)
+        sudo cp -a "$tmp_rules_dir"/. /etc/ananicy.d/ 2>/dev/null || true
+        # Ensure strict root ownership (cp -a from user tmp might preserve user owner)
+        sudo chown -R root:root /etc/ananicy.d
+        rm -rf "$tmp_rules_dir"
+    else
+        # Ensure minimal structure if fetch failed
+        sudo mkdir -p /etc/ananicy.d/{00-cgroups,00-types,00-default}
+    fi
 
     print_info "Installing SRPS custom rules for heavyweight processes..."
     sudo tee /etc/ananicy.d/00-default/99-system-resource-protection.rules >/dev/null << 'EOF'
@@ -708,14 +748,14 @@ create_monitoring_and_tools() {
 # Generated by system_resource_protection_script
 watch -n 1 -c '
 printf "\033[1;36m=== System Resource Monitor (SRPS) ===\033[0m\n\n"
-printf "\033[1;33mLoad averages:\033[0m %s\n" "$(uptime | awk -F"load average:" "{print \\$2}")"
-printf "\033[1;33mMemory:\033[0m %s\n\n" "$(free -h | awk "/Mem/ {printf \\\"%s/%s (%.0f%%)\\\", \\$3, \\$2, \\$3/\\$2*100}")"
+printf "\033[1;33mLoad averages:\033[0m %s\n" "$(uptime | awk -F"load average:" "{print \$2}")"
+printf "\033[1;33mMemory:\033[0m %s\n\n" "$(free -h | awk "/Mem/ {printf \\\"%s/%s (%.0f%%)\\\", \$3, \$2, \$3/\$2*100}")"
 
 printf "\033[1;31m=== Top CPU Hogs ===\033[0m\n"
-ps aux | sort -nrk 3,3 | head -5 | awk "{printf \\\"%-20s %5s%% NI:%3s MEM:%5s%%\\\\n\\\", substr(\\$11,1,20), \\$3, \\$18, \\$4}"
+ps aux | sort -nrk 3,3 | head -5 | awk "{printf \\\"%-20s %5s%% NI:%3s MEM:%5s%%\\\\n\\\", substr(\$11,1,20), \$3, \$18, \$4}"
 
 printf "\n\033[1;32m=== Throttled (positive nice) processes ===\033[0m\n"
-ps -eo pid,ni,comm,%cpu,%mem --sort=-ni | awk "\\$2 > 0 {printf \\\"%-7s NI:%3s CPU:%5s%% MEM:%5s%% %s\\\\n\\\", \\$1, \\$2, \\$4, \\$5, \\$3}" | head -20
+ps -eo pid,ni,comm,%cpu,%mem --sort=-ni | awk "\$2 > 0 {printf \\\"%-7s NI:%3s CPU:%5s%% MEM:%5s%% %s\\\\n\\\", \$1, \$2, \$4, \$5, \$3}" | head -20
 '
 EOF
     sudo chmod +x "$sysmon"
@@ -979,9 +1019,26 @@ EOF
 }
 # --------------- Shell Aliases / Environment -----------------
 detect_shell_rc() {
+    # 1. Trust ZDOTDIR if set (explicit zsh setup)
     if [ -n "${ZDOTDIR:-}" ] && [ -f "${ZDOTDIR}/.zshrc" ]; then
         SHELL_RC="${ZDOTDIR}/.zshrc"
-    elif [ -f "$HOME/.zshrc" ]; then
+        return
+    fi
+
+    # 2. Check current user shell
+    local shell_name
+    shell_name=$(basename "${SHELL:-bash}")
+
+    if [ "$shell_name" = "zsh" ] && [ -f "$HOME/.zshrc" ]; then
+        SHELL_RC="$HOME/.zshrc"
+        return
+    elif [ "$shell_name" = "bash" ] && [ -f "$HOME/.bashrc" ]; then
+        SHELL_RC="$HOME/.bashrc"
+        return
+    fi
+
+    # 3. Fallback heuristics
+    if [ -f "$HOME/.zshrc" ]; then
         SHELL_RC="$HOME/.zshrc"
     elif [ -f "$HOME/.bashrc" ]; then
         SHELL_RC="$HOME/.bashrc"
@@ -1313,6 +1370,8 @@ main_uninstall() {
 }
 
 # --------------- Entry Point ---------------------------------
+parse_args "$@"
+
 if [ "$ACTION" = "install" ] || [ "$ACTION" = "plan" ]; then
     main_install
 else

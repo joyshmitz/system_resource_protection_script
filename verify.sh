@@ -29,16 +29,24 @@ fi
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 echo "[verify] Using release tag: $TAG"
 
-tmp=$(mktemp -d)
+tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 curl -fsSL "$BASE/install.sh" -o "$tmp/install.sh" || die "Failed to download install.sh"
 curl -fsSL "$BASE/install.sh.sha256" -o "$tmp/install.sh.sha256" || die "Failed to download install.sh.sha256"
 
 echo "[verify] Verifying checksum..."
-cd "$tmp"
-$sha_cmd -c install.sh.sha256
-echo "[verify] OK"
+(
+  cd "$tmp"
+  $sha_cmd -c install.sh.sha256
+)
 
+echo "[verify] Checksum OK"
+
+dest="${PWD}/install.sh"
+cp "$tmp/install.sh" "$dest" || die "Failed to copy installer to $dest"
+chmod +x "$dest" || true
+
+echo "[verify] Wrote installer to: $dest"
 echo "[verify] To run the installer:"
-echo "bash install.sh [--plan|--install|--uninstall]"
+echo "$dest [--plan|--install|--uninstall]"
