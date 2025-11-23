@@ -87,6 +87,15 @@ diskWriteHist []float64
 
 	perCoreHist   map[int][]float64
 
+	// Statistics (Session)
+	cumulativeCPU map[string]float64
+	throttleCount map[string]int
+	killEvents    []model.KillEvent
+	activeTab     int // 0=Dashboard, 1=Analysis
+
+	// Async log fetcher
+	logFetcher *sampler.Sampler 
+
 	jsonFile string
 }
 
@@ -94,26 +103,31 @@ func New(cfg config.Config) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := sampler.New(cfg.Interval)
 	return &Model{
-		cfg:         cfg,
-		stream:      s.Stream(ctx),
-		ctxCancel:   cancel,
-		width:       120,
-		height:      40,
-		sortKey:     "cpu",
-		filter:      "",
-		perCoreHist: make(map[int][]float64),
-		jsonFile:    os.Getenv("SRPS_SYSMON_JSON_FILE"),
+		cfg:           cfg,
+		stream:        s.Stream(ctx),
+		ctxCancel:     cancel,
+		width:         120,
+		height:        40,
+		sortKey:       "cpu",
+		filter:        "",
+		perCoreHist:   make(map[int][]float64),
+		cumulativeCPU: make(map[string]float64),
+		throttleCount: make(map[string]int),
+		logFetcher:    s, // Reuse sampler for log fetching
+		jsonFile:      os.Getenv("SRPS_SYSMON_JSON_FILE"),
 	}
 }
 
 // Messages
 type (
 	tickMsg   struct{}
+	logTickMsg struct{}
 )
 
 func tickCmd() tea.Cmd { return tea.Tick(time.Second/5, func(time.Time) tea.Msg { return tickMsg{} }) }
+func logTickCmd() tea.Cmd { return tea.Tick(10*time.Second, func(time.Time) tea.Msg { return logTickMsg{} }) }
 
-func (m *Model) Init() tea.Cmd { return tickCmd() }
+func (m *Model) Init() tea.Cmd { return tea.Batch(tickCmd(), logTickCmd()) }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -147,6 +161,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.ctxCancel()
 			return m, tea.Quit
+		case "tab":
+			m.activeTab = (m.activeTab + 1) % 2
 		case "s":
 			if m.sortKey == "cpu" {
 				m.sortKey = "mem"
@@ -169,13 +185,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ok {
 				m.latest = samp
 				m.recordHistory(samp)
+				m.updateStats(samp)
 				m.maybeWriteJSON(samp)
 			}
 		default:
 		}
 		return m, tickCmd()
+	case logTickMsg:
+		// Fetch logs in a separate goroutine? 
+		// For simplicity, we'll just do it here since it's infrequent (10s) and we optimized the sampler to not block too hard.
+		// Ideally this should be a Cmd that returns a Msg, but direct call is okay if fast.
+		// Actually, let's use a Cmd to be safe.
+		return m, func() tea.Msg {
+			events := m.logFetcher.GetKillEvents()
+			return events
+		}
+	case []model.KillEvent:
+		m.killEvents = msg
+		return m, logTickCmd()
 	}
 	return m, nil
+}
+
+func (m *Model) updateStats(s model.Sample) {
+	// Accumulate CPU integral (CPU% * interval_seconds)
+	// Approximate interval as 1s or use s.Interval if precise
+	factor := s.Interval.Seconds()
+	
+	for _, p := range s.Top {
+		m.cumulativeCPU[p.Command] += p.CPU * factor
+	}
+	for _, p := range s.Throttled {
+		m.throttleCount[p.Command]++
+	}
 }
 
 func (m *Model) recordHistory(s model.Sample) {
@@ -213,32 +255,52 @@ func (m *Model) View() string {
 	}
 	s := m.latest
 
-	// --- Header ---
+	// --- Header with Tabs ---
 	filterTxt := ""
 	if m.filter != "" || m.inputMode {
 		filterTxt = fmt.Sprintf(" Filter: %s", displayFilter(m))
 	}
 	
-	headerLeft := titleStyle.Render(" SRPS SYSMON ")
-	headerMid := subtleStyle.Render(fmt.Sprintf(" Sort: %s | Interval: %s |%s", 
-		strings.ToUpper(m.sortKey), 
-		m.cfg.Interval, 
-		filterTxt))
+	// Tab Styles
+	activeTabStyle := titleStyle.Copy().Background(lipgloss.Color(secondaryColor))
+	inactiveTabStyle := titleStyle.Copy().Background(lipgloss.Color("#444444")).Foreground(lipgloss.Color("#888888"))
+	
+	dashTab := inactiveTabStyle.Render(" 1: Dashboard ")
+	if m.activeTab == 0 { dashTab = activeTabStyle.Render(" 1: Dashboard ") }
+	
+	histTab := inactiveTabStyle.Render(" 2: Analysis ")
+	if m.activeTab == 1 { histTab = activeTabStyle.Render(" 2: Analysis ") }
+	
+	info := subtleStyle.Render(fmt.Sprintf("Sort:%s %s", strings.ToUpper(m.sortKey), filterTxt))
 	headerRight := subtleStyle.Render(s.Timestamp.Format("15:04:05"))
 	
-	// Calculate padding for right alignment
-	gap := m.width - lipgloss.Width(headerLeft) - lipgloss.Width(headerMid) - lipgloss.Width(headerRight) - 2
+	tabs := lipgloss.JoinHorizontal(lipgloss.Bottom, dashTab, " ", histTab)
+	
+	// Calculate padding
+	gap := m.width - lipgloss.Width(tabs) - lipgloss.Width(info) - lipgloss.Width(headerRight) - 3
 	if gap < 1 { gap = 1 }
 	
-	header := lipgloss.JoinHorizontal(lipgloss.Center, 
-		headerLeft, 
-		" ", 
-		headerMid, 
+	header := lipgloss.JoinHorizontal(lipgloss.Bottom, 
+		tabs, 
 		strings.Repeat(" ", gap), 
+		info,
+		" ",
 		headerRight)
 	
 	header = headerStyle.Width(m.width).Render(header)
 
+	// Content based on tab
+	var content string
+	if m.activeTab == 0 {
+		content = m.renderDashboard(s)
+	} else {
+		content = m.renderAnalysis(s)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, content)
+}
+
+func (m *Model) renderDashboard(s model.Sample) string {
 	// --- Row 1: Vitals (CPU, MEM, SWAP, LOAD) ---
 	// CPU Section
 	cpuGauge := renderGauge("CPU", s.CPU.Total, primaryColor)
@@ -268,22 +330,22 @@ func (m *Model) View() string {
 	// --- Row 2: Throughput & Hardware (NET, DISK, GPU, BATT) ---
 	
 	// Network
-netRxSpark := renderSparkline(m.netRxHist, 15, successColor)
-netTxSpark := renderSparkline(m.netTxHist, 15, "#0077FF") // Blue
-netBlock := lipgloss.JoinVertical(lipgloss.Left,
+	netRxSpark := renderSparklineAuto(m.netRxHist, 15, successColor)
+	netTxSpark := renderSparklineAuto(m.netTxHist, 15, "#0077FF") // Blue
+	netBlock := lipgloss.JoinVertical(lipgloss.Left,
 		fmt.Sprintf("%s RX %5.1f Mb/s %s", valStyle.Foreground(lipgloss.Color(successColor)).Render("↓"), s.IO.NetRxMbps, netRxSpark),
 		fmt.Sprintf("%s TX %5.1f Mb/s %s", valStyle.Foreground(lipgloss.Color("#0077FF")).Render("↑"), s.IO.NetTxMbps, netTxSpark),
 	)
-netCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("NETWORK"), netBlock))
+	netCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("NETWORK"), netBlock))
 
 	// Disk
-diskRSpark := renderSparkline(m.diskReadHist, 15, warningColor)
-diskWSpark := renderSparkline(m.diskWriteHist, 15, secondaryColor)
-diskBlock := lipgloss.JoinVertical(lipgloss.Left,
+	diskRSpark := renderSparklineAuto(m.diskReadHist, 15, warningColor)
+	diskWSpark := renderSparklineAuto(m.diskWriteHist, 15, secondaryColor)
+	diskBlock := lipgloss.JoinVertical(lipgloss.Left,
 		fmt.Sprintf("R %5.1f MB/s %s", s.IO.DiskReadMBs, diskRSpark),
 		fmt.Sprintf("W %5.1f MB/s %s", s.IO.DiskWriteMBs, diskWSpark),
 	)
-diskCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("DISK I/O"), diskBlock))
+	diskCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("DISK I/O"), diskBlock))
 
 	// GPU & Battery
 	extraContent := ""
@@ -305,8 +367,9 @@ diskCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Ren
 	// --- Row 3: Main Content (Procs left, PerCore right) ---
 	
 	// Process List (Left Column)
-	// Calculate available height for table
-	availHeight := m.height - lipgloss.Height(header) - lipgloss.Height(row1) - lipgloss.Height(row2) - 2
+	// Calculate available height for table (approximate)
+	// header=2, row1=5, row2=5, padding=2 -> ~14 lines used
+	availHeight := m.height - 14
 	if availHeight < 5 { availHeight = 5 }
 	
 	procTable := renderProcessTable(m.sortAndFilter(s.Top), availHeight, primaryColor)
@@ -332,9 +395,95 @@ diskCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Ren
 
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, procCard, rightCard)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, row1, row2, row3)
+	return lipgloss.JoinVertical(lipgloss.Left, row1, row2, row3)
 }
 
+func (m *Model) renderAnalysis(s model.Sample) string {
+	availHeight := m.height - 4 // approximate header/padding
+
+	// 1. Hall of Shame (Left)
+	shameHeight := availHeight
+	// Limit rows: height - 2 (border) - 1 (header) - 1 (safe margin)
+	shameRows := m.getHallOfShame(shameHeight - 4)
+	shameTable := renderSimpleTable([]string{"COMMAND", "CPU-SEC"}, shameRows, 25, primaryColor)
+	shameCard := cardStyle.Width(30).Height(shameHeight).Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("HALL OF SHAME"), shameTable))
+
+	// 2. Frequent Flyers (Middle)
+	freqHeight := availHeight / 2
+	freqRows := m.getFrequentFlyers(freqHeight - 4)
+	freqTable := renderSimpleTable([]string{"COMMAND", "THROTTLED"}, freqRows, 25, secondaryColor)
+	freqCard := cardStyle.Width(30).Height(freqHeight).Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("FREQUENTLY THROTTLED"), freqTable))
+
+	// 3. Kill Log (Middle Bottom)
+	killHeight := availHeight - freqHeight - 1
+	killRows := m.getKillLog(killHeight - 4)
+	killTable := renderSimpleTable([]string{"TIME", "PID", "COMM", "REASON"}, killRows, 50, warningColor)
+	killCard := cardStyle.Width(55).Height(killHeight).Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("KILL EVENTS (Journal)"), killTable))
+
+	midCol := lipgloss.JoinVertical(lipgloss.Left, freqCard, killCard)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, shameCard, midCol)
+}
+
+// Helpers for Analysis data
+func (m *Model) getHallOfShame(limit int) []string {
+	if limit < 1 { limit = 1 }
+	type kv struct { k string; v float64 }
+	var ss []kv
+	for k, v := range m.cumulativeCPU { ss = append(ss, kv{k, v}) }
+	sort.Slice(ss, func(i, j int) bool { return ss[i].v > ss[j].v })
+	
+	var rows []string
+	for i := 0; i < limit && i < len(ss); i++ {
+		// Divide by 100 to get "Core-Seconds"
+		val := ss[i].v / 100.0
+		rows = append(rows, fmt.Sprintf("%-18s %6.1f", truncate(ss[i].k, 18), val))
+	}
+	return rows
+}
+
+func (m *Model) getFrequentFlyers(limit int) []string {
+	if limit < 1 { limit = 1 }
+	type kv struct { k string; v int }
+	var ss []kv
+	for k, v := range m.throttleCount { ss = append(ss, kv{k, v}) }
+	sort.Slice(ss, func(i, j int) bool { return ss[i].v > ss[j].v })
+	
+	var rows []string
+	for i := 0; i < limit && i < len(ss); i++ {
+		rows = append(rows, fmt.Sprintf("%-18s %6d", truncate(ss[i].k, 18), ss[i].v))
+	}
+	return rows
+}
+
+func (m *Model) getKillLog(limit int) []string {
+	var rows []string
+	for i, e := range m.killEvents {
+		if i >= limit { break }
+		// Time PID Comm Reason
+		rows = append(rows, fmt.Sprintf("%s %d %s %s", e.Timestamp.Format("15:04"), e.PID, truncate(e.Command, 10), truncate(e.Reason, 20)))
+	}
+	if len(rows) == 0 {
+		rows = append(rows, "(no events found)")
+	}
+	return rows
+}
+
+func renderSimpleTable(headers []string, rows []string, width int, color string) string {
+	var b strings.Builder
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	
+	// Header
+	headStr := strings.Join(headers, " ")
+	b.WriteString(style.Bold(true).Render(headStr) + "\n")
+	
+	for i, r := range rows {
+		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EEEEEE"))
+		if i%2 != 0 { rowStyle = rowStyle.Foreground(lipgloss.Color("#AAAAAA")) }
+		b.WriteString(rowStyle.Render(r) + "\n")
+	}
+	return b.String()
+}
 // --- Render Helpers ---
 
 func renderGauge(label string, pct float64, color string) string {
@@ -357,7 +506,7 @@ func renderGauge(label string, pct float64, color string) string {
 	)
 }
 
-func renderSparkline(values []float64, width int, color string) string {
+func renderSparklineAuto(values []float64, width int, color string) string {
 	if len(values) == 0 {
 		return strings.Repeat(" ", width)
 	}

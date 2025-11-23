@@ -71,6 +71,14 @@ type Temp struct {
 	Temp float64
 }
 
+// KillEvent represents a process kill action found in logs.
+type KillEvent struct {
+	Timestamp time.Time
+	PID       int
+	Command   string
+	Reason    string
+}
+
 // Sample is the full snapshot exchanged between sampler, UI, and JSON exporter.
 type Sample struct {
 	Timestamp time.Time
