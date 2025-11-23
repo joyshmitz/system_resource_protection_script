@@ -770,6 +770,8 @@ Env flags:
   SRPS_SYSMON_JSON_STREAM    1=NDJSON stream each interval
   SRPS_SYSMON_JSON_FILE      Path to write JSON (overwrites; streams append)
   SRPS_SYSMON_ADAPTIVE       1=double interval when not on a TTY
+  SRPS_SYSMON_GPU            0 to skip GPU queries (default 1)
+  SRPS_SYSMON_BATT           0 to skip battery query (default 1)
 Flags:
   --json                     Shortcut for SRPS_SYSMON_JSON=1 one-shot snapshot
 USAGE
@@ -791,6 +793,8 @@ json_mode=${SRPS_SYSMON_JSON:-0}
 json_stream=${SRPS_SYSMON_JSON_STREAM:-0}
 adaptive=${SRPS_SYSMON_ADAPTIVE:-0}
 json_file=${SRPS_SYSMON_JSON_FILE:-}
+enable_gpu=${SRPS_SYSMON_GPU:-1}
+enable_batt=${SRPS_SYSMON_BATT:-1}
 
 if [ "$json_stream" = "1" ] && [ "$json_mode" = "0" ]; then json_mode=1; fi
 [ -n "$json_file" ] && json_mode=1
@@ -820,6 +824,7 @@ bar(){
 }
 
 collect_battery(){
+  [ "$enable_batt" -eq 1 ] || { batt_json="null"; batt_txt=""; return; }
   batt_json="null"; batt_txt=""
   local pct state batt_dev batt_path
   if command -v upower >/dev/null 2>&1; then
@@ -841,9 +846,12 @@ collect_battery(){
 }
 
 collect_gpu(){
+  [ "$enable_gpu" -eq 1 ] || { gpu_json="[]"; gpu_txt=""; return; }
   gpu_json="[]"; gpu_txt=""
+  local tcmd=""
+  if command -v timeout >/dev/null 2>&1; then tcmd="timeout 2"; fi
   if command -v nvidia-smi >/dev/null 2>&1; then
-    mapfile -t GPUS < <(nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 2)
+    mapfile -t GPUS < <(${tcmd:-} nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 2)
     local first=1 gtxt="" line idx name util mused mtotal temp mpct
     for line in "${GPUS[@]}"; do
       IFS=',' read -r idx name util mused mtotal temp <<<"$line"
@@ -858,7 +866,7 @@ collect_gpu(){
   fi
 
   if command -v rocm-smi >/dev/null 2>&1; then
-    mapfile -t GPUS < <(rocm-smi --showuse --showtemp 2>/dev/null | grep -E 'GPU\[[0-9]+\]' | head -n 2)
+    mapfile -t GPUS < <(${tcmd:-} rocm-smi --showuse --showtemp 2>/dev/null | grep -E 'GPU\[[0-9]+\]' | head -n 2)
     local first=1 gtxt="" line idx util temp
     for line in "${GPUS[@]}"; do
       idx=$(echo "$line" | grep -oE 'GPU\[[0-9]+\]' | tr -dc '0-9')
