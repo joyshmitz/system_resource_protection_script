@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="Dicklesworthstone/system_resource_protection_script"
-TAG="${1:-latest}"
+REF="${1:-main}"   # branch, tag, or commit sha (default: main)
 
 die() { echo "[verify] $*" >&2; exit 1; }
 
@@ -19,26 +19,21 @@ else
   die "Missing required tool: sha256sum or shasum"
 fi
 
-if [ "$TAG" = "latest" ]; then
-  require jq
-  TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | jq -r .tag_name)
-fi
-
-[ -z "$TAG" ] && die "Could not determine tag"
-
-BASE="https://github.com/${REPO}/releases/download/${TAG}"
-echo "[verify] Using release tag: $TAG"
+CB="$(date +%s)"  # cache-buster
+BASE="https://raw.githubusercontent.com/${REPO}/${REF}"
+echo "[verify] Using ref: $REF"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL "$BASE/install.sh" -o "$tmp/install.sh" || die "Failed to download install.sh"
-curl -fsSL "$BASE/install.sh.sha256" -o "$tmp/install.sh.sha256" || die "Failed to download install.sh.sha256"
+curl -fsSL "${BASE}/install.sh?cb=${CB}" -o "$tmp/install.sh" || die "Failed to download install.sh"
+curl -fsSL "${BASE}/SHA256SUMS?cb=${CB}" -o "$tmp/SHA256SUMS" || die "Failed to download SHA256SUMS"
 
 echo "[verify] Verifying checksum..."
 (
   cd "$tmp"
-  $sha_cmd -c install.sh.sha256
+  grep "  install.sh$" SHA256SUMS > install.sha
+  $sha_cmd -c install.sha
 )
 
 echo "[verify] Checksum OK"

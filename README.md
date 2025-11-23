@@ -32,20 +32,23 @@ This repo contains a **single, self-contained shell script** that intelligently 
 
 ### 📥 Install (or Update)
 
-Recommended (with integrity check, cache-busting to avoid stale CDN copies):
+Recommended (latest `main`, cache-busted + checksum verify):
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/verify.sh?cb=$(date +%s)" -o verify.sh
-bash verify.sh latest          # downloads release install.sh + checksum and verifies
-./install.sh --plan            # preview (dry-run)
-./install.sh --install         # apply (or just ./install.sh)
+cb=$(date +%s)
+curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/verify.sh?cb=$cb" -o verify.sh
+bash verify.sh                    # downloads install.sh + SHA256SUMS from main and verifies
+bash install.sh --plan            # preview (dry-run)
+bash install.sh --install         # apply
 ```
 
-Quick (no verification; also cache-busted):
+Quick (pipe from latest `main`, cache-busted):
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh?cb=$(date +%s)" | bash
 ```
+
+If you prefer a specific ref, you can pass it: `bash verify.sh v1.1.2` or `bash verify.sh <commit-sha>`.
 
 #### What Happens During Install
 
@@ -72,6 +75,14 @@ To undo SRPS configuration and restore backups where possible:
 curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/system_resource_protection_script/main/install.sh?cb=$(date +%s)" -o install.sh
 bash install.sh --uninstall
 ```
+
+### 🔒 Maintainer integrity workflow
+
+- Run `scripts/update_checksums.sh` after editing `install.sh` or `verify.sh` (or use the hook below).
+- Optional git hook to enforce fresh checksums:
+  ```bash
+  ln -sf ../../scripts/pre-commit-checksums.sh .git/hooks/pre-commit
+  ```
 
 **Non-interactive uninstall:**
 
