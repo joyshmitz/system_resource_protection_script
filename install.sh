@@ -1219,8 +1219,8 @@ EOF
         fi
     fi
 
-    # Ensure legacy bash sysmon exists as safety net
-    if [ ! -x "$sysmon" ] || ! sudo grep -q "system_resource_protection_script" "$sysmon" 2>/dev/null; then
+    # Ensure a sysmon exists as safety net (do not overwrite working sysmon-go)
+    if [ ! -x "$sysmon" ]; then
         install_bash_sysmon "$sysmon"
     fi
 
