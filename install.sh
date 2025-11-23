@@ -807,7 +807,7 @@ else
 fi
 
 bar() {
-  local pct=$1 width=$2 filled
+  local pct=${1:-0} width=${2:-20} filled
   filled=$(( pct * width / 100 ))
   printf '['
   if [ "$filled" -gt 0 ]; then printf '%0.s#' $(seq 1 "$filled"); fi
@@ -840,6 +840,7 @@ cpu_line() {
     pct=$(awk -v dt="$dt" -v di="$di" 'BEGIN { if (dt<=0) {print 0} else {printf "%.0f", (1 - di/dt)*100} }')
   fi
   prev_total=$t; prev_idle=$i; last_cpu_pct=$pct
+  if [ "$json_mode" = "1" ]; then return; fi
   printf "%sCPU%s   " "$(c 4)" "$(r)"; bar "$pct" "$bar_width"
   printf "  load %s\n" "$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg)"
 }
@@ -853,6 +854,7 @@ mem_line() {
   read -r swap_total swap_free <<<"$(awk '/SwapTotal/ {t=$2} /SwapFree/ {f=$2} END {print t, f}' /proc/meminfo)"
   swap_used=$(( swap_total - swap_free ))
   swap_pct=$(awk -v u="$swap_used" -v t="$swap_total" 'BEGIN { if (t==0) {print 0} else {printf "%.0f", (u/t)*100} }')
+  if [ "$json_mode" = "1" ]; then return; fi
   printf "%sMEM%s  " "$(c 3)" "$(r)"; bar "$pct" "$bar_width"
   printf "  %5.1f/%5.1f GiB | Swap %3s%%\n" \
     "$(awk -v v="$used" 'BEGIN {printf "%.1f", v/1048576}')" \
@@ -862,7 +864,7 @@ mem_line() {
 
 collect_cgroups() {
   cgroup_txt=""; cgroup_json="["; cf=1
-  ps -eo cgroup,%cpu --sort=-%cpu | head -n 50 | \
+  ps -eo cgroup,%cpu --sort=-%cpu --no-headers | head -n 50 | \
     awk '{cg=$1; gsub(/^.+:/,"",cg); if(cg=="-") cg="unknown"; n=split(cg,a,"/"); name=a[n]; if(name=="") name="/"; cpu=$2; sum[name]+=cpu} END {for (n in sum) print sum[n], n}' \
     | sort -nr | head -n 5 | while read -r cpu name; do
       cgroup_txt+=$(printf "%-20s CPU:%5.1f%%\n" "$name" "$cpu")
@@ -887,7 +889,7 @@ print_top_cpu() {
 
 print_throttled() {
   printf "%sThrottled (nice>0, live)%s\n" "$(c 2)" "$(r)"
-  ps -eo comm,pid,ni,%cpu,%mem --sort=-ni |
+  ps -eo comm,pid,ni,%cpu,%mem --sort=-ni --no-headers |
     awk '$3>0 {printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%\n", $1, $2, $3, $4, $5}' |
     head -n 8
 }
@@ -930,8 +932,8 @@ disk_net_lines() {
         read_sectors=$((read_sectors + rsect)); write_sectors=$((write_sectors + wsect))
         delta_counter "${prev_dev_r[$dev]:-}" "$rsect"; rd_d=$_delta; prev_dev_r[$dev]=$rsect
         delta_counter "${prev_dev_w[$dev]:-}" "$wsect"; wr_d=$_delta; prev_dev_w[$dev]=$wsect
-        dev_r_mb=$(awk -v s="$rd_d" -v int="$interval" 'BEGIN {printf "%.2f", s*512/1048576/int}')
-        dev_w_mb=$(awk -v s="$wr_d" -v int="$interval" 'BEGIN {printf "%.2f", s*512/1048576/int}')
+        dev_r_mb=$(awk -v s="$rd_d" -v iv="$interval" 'BEGIN {printf "%.2f", s*512/1048576/iv}')
+        dev_w_mb=$(awk -v s="$wr_d" -v iv="$interval" 'BEGIN {printf "%.2f", s*512/1048576/iv}')
         if [ "$json_mode" = "1" ] || [ "$json_stream" = "1" ]; then
           [ $dev_first -eq 1 ] || dev_json+=","; dev_first=0
           dev_json+=$(printf '{"dev":"%s","read_mb_s":%s,"write_mb_s":%s}' "$dev" "$dev_r_mb" "$dev_w_mb")
@@ -943,8 +945,8 @@ disk_net_lines() {
 
   delta_counter "$prev_disk_r" "$read_sectors"; rd=$_delta; prev_disk_r=$read_sectors
   delta_counter "$prev_disk_w" "$write_sectors"; wr=$_delta; prev_disk_w=$write_sectors
-  rd_mb=$(awk -v s="$rd" -v int="$interval" 'BEGIN {printf "%.1f", s*512/1048576/int}')
-  wr_mb=$(awk -v s="$wr" -v int="$interval" 'BEGIN {printf "%.1f", s*512/1048576/int}')
+  rd_mb=$(awk -v s="$rd" -v iv="$interval" 'BEGIN {printf "%.1f", s*512/1048576/iv}')
+  wr_mb=$(awk -v s="$wr" -v iv="$interval" 'BEGIN {printf "%.1f", s*512/1048576/iv}')
 
   local rx_bytes=0 tx_bytes=0
   if [ -r /proc/net/dev ]; then
@@ -956,13 +958,14 @@ disk_net_lines() {
 
   delta_counter "$prev_net_rx" "$rx_bytes"; rx_d=$_delta; prev_net_rx=$rx_bytes
   delta_counter "$prev_net_tx" "$tx_bytes"; tx_d=$_delta; prev_net_tx=$tx_bytes
-  rx_mbps=$(awk -v b="$rx_d" -v int="$interval" 'BEGIN {printf "%.1f", (b*8/1e6)/int}')
-  tx_mbps=$(awk -v b="$tx_d" -v int="$interval" 'BEGIN {printf "%.1f", (b*8/1e6)/int}')
+  rx_mbps=$(awk -v b="$rx_d" -v iv="$interval" 'BEGIN {printf "%.1f", (b*8/1e6)/iv}')
+  tx_mbps=$(awk -v b="$tx_d" -v iv="$interval" 'BEGIN {printf "%.1f", (b*8/1e6)/iv}')
 
   last_rd_mb=$rd_mb; last_wr_mb=$wr_mb; last_rx_mbps=$rx_mbps; last_tx_mbps=$tx_mbps
-  printf "%sIO%s   R:%5.1fMB/s W:%5.1fMB/s   %sNET%s RX:%5.1fMb/s TX:%5.1fMb/s
-" \
-    "$(c 6)" "$(r)" "$rd_mb" "$wr_mb" "$(c 6)" "$(r)" "$rx_mbps" "$tx_mbps"
+  if [ "$json_mode" != "1" ]; then
+    printf "%sIO%s   R:%5.1fMB/s W:%5.1fMB/s   %sNET%s RX:%5.1fMb/s TX:%5.1fMb/s\n" \
+      "$(c 6)" "$(r)" "$rd_mb" "$wr_mb" "$(c 6)" "$(r)" "$rx_mbps" "$tx_mbps"
+  fi
 }
 
 print_footer() {
@@ -975,44 +978,49 @@ print_footer() {
 prev_total=""; prev_idle=""; json_warmup=0; adapt_interval_if_needed
 
 while true; do
-  snapshot=$(ps -eo comm,pid,ni,%cpu,%mem --sort=-%cpu | head -n 8)
+  snapshot=$(ps -eo comm,pid,ni,%cpu,%mem --sort=-%cpu --no-headers | head -n 8)
   view="$snapshot"
 
   while read -r comm pid ni cpu mem; do
     [ -z "$comm" ] && continue
-    cpu10=$(awk -v c="$cpu" 'BEGIN {printf "%d", c*10}'); cpu_accu["$comm"]=$(( ${cpu_accu[$comm]:-0} + cpu10 * interval ))
+    cpu10=$(awk -v c="$cpu" 'BEGIN {printf "%d", c*10}')
+    inc=$(awk -v c10="$cpu10" -v iv="$interval" 'BEGIN {printf "%d", c10*iv}')
+    cpu_accu["$comm"]=$(( ${cpu_accu[$comm]:-0} + inc ))
     cur_cpu_int=$(awk -v c="$cpu" 'BEGIN {printf "%.1f", c}')
     cur_mem_int=$(awk -v m="$mem" 'BEGIN {printf "%.1f", m}')
     awk -v cur="$cur_cpu_int" -v max="${max_cpu[$comm]:-0}" 'BEGIN {exit !(cur>max)}' && max_cpu[$comm]=$cur_cpu_int
     awk -v cur="$cur_mem_int" -v max="${max_mem[$comm]:-0}" 'BEGIN {exit !(cur>max)}' && max_mem[$comm]=$cur_mem_int
   done <<< "$snapshot"
 
-  clear 2>/dev/null || true
-  printf "%s%sSYSTEM RESOURCE MONITOR%s
+  if [ "$json_mode" != "1" ]; then
+    clear 2>/dev/null || true
+    printf "%s%sSYSTEM RESOURCE MONITOR%s
 " "$(b)" "$(c 6)" "$(r)"
-  printf "%s%(%a %b %d %H:%M:%S %Z %Y)T%s
+    printf "%s%(%a %b %d %H:%M:%S %Z %Y)T%s
 
 " "$(b)" -1 "$(r)"
-  cpu_line; mem_line; disk_net_lines; collect_cgroups; printf "
+    cpu_line; mem_line; disk_net_lines; collect_cgroups; printf "
 "
 
-  if [ -n "$focus_re" ]; then
-    focus_view=$(echo "$snapshot" | awk -v re="$focus_re" '$0 ~ re')
-    printf "%sFocus (re: %s)%s
+    if [ -n "$focus_re" ]; then
+      focus_view=$(echo "$snapshot" | awk -v re="$focus_re" '$0 ~ re')
+      printf "%sFocus (re: %s)%s
 " "$(c 6)" "$focus_re" "$(r)"
-    if [ -n "$focus_view" ]; then
-      echo "$focus_view" | awk '{printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%
+      if [ -n "$focus_view" ]; then
+        echo "$focus_view" | awk '{printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%
 ", $1, $2, $3, $4, $5}'
-      printf "
+        printf "
 "; view="$focus_view"
-    else
-      echo "(no matches)
+      else
+        echo "(no matches)
 "
+      fi
     fi
+
+    print_top_cpu; print_throttled; print_historical; print_per_core; print_cgroups; print_footer
+  else
+    cpu_line; mem_line; disk_net_lines; collect_cgroups
   fi
-
-  print_top_cpu; print_throttled; print_historical; print_per_core; print_cgroups; print_footer
-
   if [ "$json_mode" = "1" ]; then
     if [ $json_warmup -eq 0 ]; then json_warmup=1; sleep "$interval"; continue; fi
     esc(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -1022,6 +1030,7 @@ while true; do
       [ $tf -eq 1 ] || top_json+=","; tf=0
       top_json+=$(printf '{"cmd":"%s","pid":%s,"nice":%s,"cpu":%s,"mem":%s}' "$(esc "$cmd")" "$pid" "$ni" "$cpu" "$mem")
     done <<< "$view"
+    top_json+="]"
 
     hist_json="["; hf=1
     for k in "${!cpu_accu[@]}"; do
@@ -1111,13 +1120,15 @@ if [ "${SRPS_JSON:-0}" = "1" ]; then
   esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
   printf '{"throttled":['
   first=1
-  while read -r pid cmd ni cpu mem; do
+  while read -r pid ni cpu mem cmd; do
+    [[ "$ni" =~ ^-?[0-9]+$ ]] || continue
+    [ "${ni:-0}" -gt 0 ] || continue
     [ "$first" -eq 1 ] || printf ','
     first=0
     io=$(ionice -p "$pid" 2>/dev/null | grep -oE 'idle|best-effort|rt|prio [0-9]+' | head -1 || true)
     printf '{"pid":%s,"cmd":"%s","nice":%s,"cpu":%.1f,"mem":%.1f,"io":"%s"}' \
       "$pid" "$(esc "$cmd")" "$ni" "$cpu" "$mem" "$(esc "${io:-}")"
-  done < <(ps -eo pid,comm,ni,%cpu,%mem --sort=-%cpu | awk '$3>0 {print $1, $2, $3, $4, $5}')
+  done < <(ps -eo pid,ni,%cpu,%mem,comm --sort=-%cpu --no-headers)
   printf ']}'
   exit 0
 fi
@@ -1126,12 +1137,15 @@ printf "%s%sCurrently Throttled (nice>0)%s\n" "$(b)" "$(c 6)" "$(r)"
 printf "%-22s %-6s %-6s %-8s %-8s %-10s\n" "PROCESS" "PID" "NI" "CPU%" "MEM%" "IO"
 printf "%-22s %-6s %-6s %-8s %-8s %-10s\n" "----------------------" "------" "------" "------" "------" "----------"
 
-found=0
-while read -r pid cmd ni cpu mem; do
+found=0; count=0
+while read -r pid ni cpu mem cmd; do
+  [[ "$ni" =~ ^-?[0-9]+$ ]] || continue
+  [ "${ni:-0}" -gt 0 ] || continue
   found=1
   io=$(ionice -p "$pid" 2>/dev/null | grep -oE 'idle|best-effort|rt|prio [0-9]+' | head -1 || true)
   printf "%-22s %-6s %-6s %-8.1f %-8.1f %-10s\n" "$cmd" "$pid" "$ni" "$cpu" "$mem" "${io:-?}"
-done < <(ps -eo pid,comm,ni,%cpu,%mem --sort=-%cpu | awk '$3>0 {print $1, $2, $3, $4, $5}')
+  count=$((count+1)); [ $count -lt 8 ] || break
+done < <(ps -eo pid,ni,%cpu,%mem,comm --sort=-%cpu --no-headers)
 [ "$found" -eq 0 ] && printf "%s(no throttled processes)%s\n" "$(c 3)" "$(r)"
 EOF
     sudo chmod +x "$check_throttled"
@@ -1377,11 +1391,6 @@ EOF
     sudo tee "$srps_reload" >/dev/null << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "Reloading ananicy-cpp rules..."
-if [ ! -d /etc/ananicy.d ]; then
-  echo "No /etc/ananicy.d found" >&2
-  exit 1
-fi
 if [ "${1:-}" = "--help" ]; then
   cat <<'USAGE'
 srps-reload-rules - restart ananicy-cpp and report rule count
@@ -1402,6 +1411,12 @@ if [ "${SRPS_JSON:-0}" = "1" ]; then
     exit 1
   fi
   exit 0
+fi
+
+echo "Reloading ananicy-cpp rules..."
+if [ ! -d /etc/ananicy.d ]; then
+  echo "No /etc/ananicy.d found" >&2
+  exit 1
 fi
 
 if command -v ananicy-cpp >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
