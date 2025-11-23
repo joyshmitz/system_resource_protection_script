@@ -159,10 +159,10 @@ docker run --rm -it --privileged -v /:/host srps-tools --plan
 
 - **Tagged release (recommended):** `install.sh` from `https://github.com/Dicklesworthstone/system_resource_protection_script/releases/latest/download/install.sh` or `brew install srps` (defaults to latest tag). `srps-verify latest` checks these release assets.
 - **Track main:** `brew install --HEAD srps` or `curl .../main/install.sh | bash`. This may differ from the last release; `srps-verify` will still validate the latest release, not HEAD. Use HEAD only if you accept that mismatch.
-- **Nix:** `nix run github:Dicklesworthstone/system_resource_protection_script` follows the default branch; the flake version string comes from the git rev. For a frozen release, pin the tag (e.g., `github:.../system_resource_protection_script/v1.1.1`).
+- **Nix:** `nix run github:Dicklesworthstone/system_resource_protection_script` follows the default branch; the flake version string comes from the git rev. For a frozen release, pin the tag (e.g., `github:.../system_resource_protection_script/v1.1.2`).
 - **Docker toolbox:** Build locally with the checked-out source; intended for planning (`--plan`). Avoid mutating a host from inside the container unless you know the risks.
 - **Checksums:** Each release attaches `install.sh` and `install.sh.sha256` plus `verify.sh`. Verify with `sha256sum -c install.sh.sha256` (or `shasum -a 256 -c install.sh.sha256`) and run `srps-verify latest` to confirm fetched assets match the published release.
-- **Current release:** `v1.1.1` (assets uploaded by the fixed Release Assets workflow). `v1.1.0` is marked prerelease/superseded for history but still has matching assets.
+- **Current release:** `v1.1.2` (assets uploaded by the fixed Release Assets workflow). `v1.1.1` remains available for history but is superseded.
 
 ---
 
@@ -404,10 +404,10 @@ SRPS_EARLYOOM_ARGS="-m 4 -s 10 --prefer 'chrome|node' --avoid 'Xorg|gnome-shell'
 
 - Every release uploads `install.sh`, `install.sh.sha256`, and `verify.sh`.
 - Use `verify.sh <tag|latest>` (or `srps-verify <tag|latest>` from Homebrew) to download and verify before running.
-- Manual check example (replace `v1.1.1` with your target tag):
+- Manual check example (replace `v1.1.2` with your target tag):
 
 ```bash
-TAG=v1.1.1
+TAG=v1.1.2
 curl -fsSL "https://github.com/Dicklesworthstone/system_resource_protection_script/releases/download/$TAG/install.sh" -o install.sh
 curl -fsSL "https://github.com/Dicklesworthstone/system_resource_protection_script/releases/download/$TAG/install.sh.sha256" -o install.sh.sha256
 sha256sum -c install.sh.sha256   # or: shasum -a 256 -c install.sh.sha256
