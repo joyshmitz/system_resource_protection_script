@@ -43,8 +43,11 @@ func FromFlags(args []string) Config {
 	_ = fs.Parse(args)
 
 	if v := os.Getenv("SRPS_SYSMON_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v + "s"); err == nil { // legacy env uses seconds
-			cfg.Interval = d
+		// Legacy env expects bare seconds; if user supplies a duration string, honor it.
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.Interval = parsed
+		} else if parsed, err2 := time.ParseDuration(v + "s"); err2 == nil {
+			cfg.Interval = parsed
 		}
 	}
 	if v := os.Getenv("SRPS_SYSMON_GPU"); v == "0" {
