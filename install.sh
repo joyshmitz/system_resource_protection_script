@@ -1169,6 +1169,7 @@ EOF
             rm -f "$tmpbin"
             return 0
         fi
+        print_info "sysmon-go binary not found at ${bin_url}; will try to build from source"
         rm -f "$tmpbin"
 
         # 2) Build from source tarball (needs Go)
@@ -1196,11 +1197,12 @@ EOF
         fi
         srcdir=$(find "$tmpdir" -maxdepth 1 -type d -name "system_resource_protection_script-*" | head -1)
         if [ -z "$srcdir" ]; then rm -rf "$tmpdir"; return 1; fi
-        if CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -C "$srcdir" -o "$tmpdir/sysmon-go" ./cmd/sysmon >/dev/null 2>&1; then
+        if out=$(CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -C "$srcdir" -o "$tmpdir/sysmon-go" ./cmd/sysmon 2>&1); then
             sudo install -m 0755 "$tmpdir/sysmon-go" "$sysmon_go"
             rm -rf "$tmpdir"
             return 0
         fi
+        print_warning "Go build of sysmon-go failed: $out"
         rm -rf "$tmpdir"
         return 1
     }
