@@ -28,16 +28,16 @@ This repo contains a **single, self-contained shell script** that intelligently 
 
 ```mermaid
 flowchart TB
-    A([Detect system & sudo])
-    B{Plan mode?}
-    C[/Show actions only/]
-    D([Install packages])
-    E([Build ananicy-cpp])
-    F([Install rules])
-    G([Configure EarlyOOM])
-    H([Apply sysctl & systemd limits])
-    I([Install helpers & aliases])
-    J([Summaries + diagnostics])
+    A["Detect system & sudo"]
+    B{"Plan mode?"}
+    C["Show actions only"]
+    D["Install packages"]
+    E["Build ananicy-cpp"]
+    F["Install rules"]
+    G["Configure EarlyOOM"]
+    H["Apply sysctl & systemd limits"]
+    I["Install helpers & aliases"]
+    J["Summaries + diagnostics"]
 
     A --> B
     B -->|yes| C
