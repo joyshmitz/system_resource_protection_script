@@ -26,38 +26,6 @@ This repo contains a **single, self-contained shell script** that intelligently 
 
 > ✨ **Designed to be safe to run repeatedly, and fully reversible via `--uninstall`**
 
-```mermaid
-flowchart TB
-    A["🔍 Detect system & sudo"]:::pastelBlue
-    B{"Plan mode?"}:::pastelYellow
-    C["👁️ Show actions only"]:::pastelGreen
-    D["📦 Install packages"]:::pastelPurple
-    E["🔨 Build ananicy-cpp"]:::pastelPurple
-    F["📋 Install rules"]:::pastelPurple
-    G["⚡ Configure EarlyOOM"]:::pastelOrange
-    H["⚙️ Apply sysctl & systemd limits"]:::pastelOrange
-    I["🛠️ Install helpers & aliases"]:::pastelPink
-    J["📊 Summaries + diagnostics"]:::pastelTeal
-
-    A --> B
-    B -->|yes| C
-    B -->|no| D
-    D --> E
-    E --> F
-    F --> G
-    G --> H
-    H --> I
-    I --> J
-
-    classDef pastelBlue fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#000
-    classDef pastelYellow fill:#FFF9C4,stroke:#F57F17,stroke-width:2px,color:#000
-    classDef pastelGreen fill:#C8E6C9,stroke:#388E3C,stroke-width:2px,color:#000
-    classDef pastelPurple fill:#E1BEE7,stroke:#7B1FA2,stroke-width:2px,color:#000
-    classDef pastelOrange fill:#FFE0B2,stroke:#E65100,stroke-width:2px,color:#000
-    classDef pastelPink fill:#F8BBD0,stroke:#C2185B,stroke-width:2px,color:#000
-    classDef pastelTeal fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#000
-```
-
 ---
 
 ## 🚀 Quickstart
@@ -678,6 +646,42 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/system_resource_p
 
 - ✅ You're okay with some opinionated defaults
 - ✅ You can read/edit the script and rules if needed
+
+---
+
+## 📊 Installation Flow Diagram
+
+```mermaid
+flowchart TB
+    A["🔍 Detect system & sudo"]:::pastelBlue
+    B{"Plan mode?"}:::pastelYellow
+    C["👁️ Show actions only"]:::pastelGreen
+    D["📦 Install packages"]:::pastelPurple
+    E["🔨 Build ananicy-cpp"]:::pastelPurple
+    F["📋 Install rules"]:::pastelPurple
+    G["⚡ Configure EarlyOOM"]:::pastelOrange
+    H["⚙️ Apply sysctl & systemd limits"]:::pastelOrange
+    I["🛠️ Install helpers & aliases"]:::pastelPink
+    J["📊 Summaries + diagnostics"]:::pastelTeal
+
+    A --> B
+    B -->|yes| C
+    B -->|no| D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    H --> I
+    I --> J
+
+    classDef pastelBlue fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#000
+    classDef pastelYellow fill:#FFF9C4,stroke:#F57F17,stroke-width:2px,color:#000
+    classDef pastelGreen fill:#C8E6C9,stroke:#388E3C,stroke-width:2px,color:#000
+    classDef pastelPurple fill:#E1BEE7,stroke:#7B1FA2,stroke-width:2px,color:#000
+    classDef pastelOrange fill:#FFE0B2,stroke:#E65100,stroke-width:2px,color:#000
+    classDef pastelPink fill:#F8BBD0,stroke:#C2185B,stroke-width:2px,color:#000
+    classDef pastelTeal fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#000
+```
 
 ---
 
