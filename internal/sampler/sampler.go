@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Dicklesworthstone/system_resource_protection_script/internal/model"
@@ -30,18 +31,28 @@ type Sampler struct {
 	prevCore  []cpu.TimesStat
 	prevDisk  map[string]disk.IOCountersStat
 	prevNet   []net.IOCountersStat
+
+	// Cgroup cache
+	cgroupCache map[int]string
+	cacheTick   int
+
+	// GPU async
+	gpuData []model.GPU
+	gpuMu   sync.RWMutex
 }
 
 func New(interval time.Duration) *Sampler {
 	return &Sampler{
-		Interval: interval,
-		prevDisk: make(map[string]disk.IOCountersStat),
+		Interval:    interval,
+		prevDisk:    make(map[string]disk.IOCountersStat),
+		cgroupCache: make(map[int]string),
 	}
 }
 
 // Stream returns a channel that will receive snapshots until ctx is done.
 func (s *Sampler) Stream(ctx context.Context) <-chan model.Sample {
 	ch := make(chan model.Sample)
+	go s.gpuLoop(ctx)
 	go func() {
 		ticker := time.NewTicker(s.Interval)
 		defer ticker.Stop()
@@ -67,9 +78,18 @@ func (s *Sampler) sample(now time.Time) model.Sample {
 
 	ioStat := s.ioNet()
 
+	// Clear cgroup cache occasionally (every ~60 ticks) to handle PID reuse
+	s.cacheTick++
+	if s.cacheTick > 60 {
+		s.cgroupCache = make(map[int]string)
+		s.cacheTick = 0
+	}
 	top, throttled, cgroups := s.topProcs()
 
-	gpus := s.gpu()
+	s.gpuMu.RLock()
+	gpus := s.gpuData
+	s.gpuMu.RUnlock()
+
 	batt := s.battery()
 	inotify := s.inotify()
 	temps := s.temps()
@@ -207,7 +227,7 @@ func (s *Sampler) topProcs() (top []model.Process, throttled []model.Process, cg
 		}
 		// cgroup aggregate (best-effort)
 		// Best-effort cgroup aggregation: parse /proc/<pid>/cgroup last path component.
-		if cgPath, err := readProcCgroup(int(p.Pid)); err == nil {
+		if cgPath, err := s.readProcCgroup(int(p.Pid)); err == nil {
 			if _, ok := cgMap[cgPath]; !ok {
 				cgMap[cgPath] = &cgAgg{}
 			}
@@ -234,7 +254,32 @@ func (s *Sampler) topProcs() (top []model.Process, throttled []model.Process, cg
 	return
 }
 
-func (s *Sampler) gpu() []model.GPU {
+func (s *Sampler) gpuLoop(ctx context.Context) {
+	// Initial fetch
+	s.updateGPU()
+
+	// Poll GPU slower than main loop to reduce overhead/stutter
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.updateGPU()
+		}
+	}
+}
+
+func (s *Sampler) updateGPU() {
+	data := s.queryGPU()
+	s.gpuMu.Lock()
+	s.gpuData = data
+	s.gpuMu.Unlock()
+}
+
+func (s *Sampler) queryGPU() []model.GPU {
 	out, _ := runCmd(400*time.Millisecond, "nvidia-smi",
 		"--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
 		"--format=csv,noheader,nounits")
@@ -337,7 +382,10 @@ func runCmd(timeout time.Duration, name string, args ...string) (string, error) 
 }
 
 // readProcCgroup returns the last path component of the first cgroup entry.
-func readProcCgroup(pid int) (string, error) {
+func (s *Sampler) readProcCgroup(pid int) (string, error) {
+	if v, ok := s.cgroupCache[pid]; ok {
+		return v, nil
+	}
 	path := fmt.Sprintf("/proc/%d/cgroup", pid)
 	f, err := os.Open(path)
 	if err != nil {
@@ -355,6 +403,7 @@ func readProcCgroup(pid int) (string, error) {
 		segs := strings.Split(p, "/")
 		for i := len(segs) - 1; i >= 0; i-- {
 			if segs[i] != "" {
+				s.cgroupCache[pid] = segs[i]
 				return segs[i], nil
 			}
 		}

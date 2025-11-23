@@ -369,7 +369,12 @@ configure_ananicy_rules() {
             print_info "Backing up current /etc/ananicy.d to $backup_dir"
             sudo cp -a /etc/ananicy.d "$backup_dir"
         fi
-        sudo rm -rf /etc/ananicy.d
+        
+        if [ "$fetch_success" -eq 1 ]; then
+            sudo rm -rf /etc/ananicy.d
+        else
+            print_warning "Download failed; preserving existing /etc/ananicy.d and just updating SRPS rules."
+        fi
     fi
 
     sudo mkdir -p /etc/ananicy.d
@@ -545,6 +550,11 @@ install_and_configure_earlyoom() {
     fi
 
     print_info "Writing SRPS EarlyOOM preferences..."
+    
+    if [ "$ON_BATTERY" -eq 1 ]; then
+         print_warning "Battery detected: Configuring EarlyOOM for aggressive battery saving. This config is static; run install.sh again if you switch to a workstation setup."
+    fi
+
     local earlyoom_args_value earlyoom_args_comment earlyoom_args_escaped
 
     if [ -n "${SRPS_EARLYOOM_ARGS:-}" ]; then
@@ -896,8 +906,7 @@ cpu_line(){
   fi
   prev_total=$t; prev_idle=$i; last_cpu_pct=$pct
   [ "$json_mode" = "1" ] && return
-  printf "%sCPU%s   " "$(c 4)" "$(r)"; bar "$pct" "$bar_width"; printf "  load %s
-" "$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg)"
+  printf "%sCPU%s   " "$(c 4)" "$(r)"; bar "$pct" "$bar_width"; printf "  load %s\n" "$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg)"
 }
 
 mem_line(){
@@ -907,8 +916,7 @@ mem_line(){
   read -r st sf <<<"$(awk '/SwapTotal/{t=$2} /SwapFree/{f=$2} END{print t,f}' /proc/meminfo)"; su=$((st-sf))
   spct=$(awk -v u="$su" -v t="$st" 'BEGIN{if(t==0)print 0; else printf "%.0f", (u/t)*100}')
   [ "$json_mode" = "1" ] && return
-  printf "%sMEM%s  " "$(c 3)" "$(r)"; bar "$pct" "$bar_width"; printf "  %5.1f/%5.1f GiB | Swap %3s%%
-" "$(awk -v v="$used" 'BEGIN{printf "%.1f", v/1048576}')" "$(awk -v v="$total" 'BEGIN{printf "%.1f", v/1048576}')" "$spct"
+  printf "%sMEM%s  " "$(c 3)" "$(r)"; bar "$pct" "$bar_width"; printf "  %5.1f/%5.1f GiB | Swap %3s%%\n" "$(awk -v v="$used" 'BEGIN{printf "%.1f", v/1048576}')" "$(awk -v v="$total" 'BEGIN{printf "%.1f", v/1048576}')" "$spct"
 }
 
 collect_cgroups(){
@@ -917,8 +925,7 @@ collect_cgroups(){
   cf=1
   set +o pipefail
   while read -r cpu name; do
-    cgroup_txt+=$(printf "%-20s CPU:%5.1f%%
-" "$name" "$cpu")
+    cgroup_txt+=$(printf "%-20s CPU:%5.1f%%\n" "$name" "$cpu")
     [ $cf -eq 1 ] || cgroup_json+=","; cf=0
     cgroup_json+=$(printf '{"cgroup":"%s","cpu":%.1f}' "$name" "$cpu")
   done < <(
@@ -931,34 +938,19 @@ collect_cgroups(){
   cgroup_json+="]"
 }
 
-print_cgroups(){ if [ "$percore" -eq 1 ] && [ -n "$cgroup_txt" ]; then printf "%sTop cgroups (CPU)%s
-%s
-" "$(c 5)" "$(r)" "$cgroup_txt"; fi; }
+print_cgroups(){ if [ "$percore" -eq 1 ] && [ -n "$cgroup_txt" ]; then printf "%sTop cgroups (CPU)%s\n%s\n" "$(c 5)" "$(r)" "$cgroup_txt"; fi; }
 
-print_top_cpu(){ printf "%sTop CPU (live)%s  comm pid ni cpu mem
-" "$(c 1)" "$(r)"; printf "%-18s %-6s %-5s %-7s %-7s
-" "------------------" "------" "-----" "-------" "-------"; while IFS='|' read -r pid ni cpu mem comm; do [ -z "$comm" ] && continue; printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%
-" "$comm" "$pid" "$ni" "$cpu" "$mem"; done <<< "${view:-$snapshot}"; printf "
-"; }
+print_top_cpu(){ printf "%sTop CPU (live)%s  comm pid ni cpu mem\n" "$(c 1)" "$(r)"; printf "%-18s %-6s %-5s %-7s %-7s\n" "------------------" "------" "-----" "-------" "-------"; while IFS='|' read -r pid ni cpu mem comm; do [ -z "$comm" ] && continue; printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%\n" "$comm" "$pid" "$ni" "$cpu" "$mem"; done <<< "${view:-$snapshot}"; printf "\n"; }
 
 print_throttled(){
-  printf "%sThrottled (nice>0, live)%s
-" "$(c 2)" "$(r)"
+  printf "%sThrottled (nice>0, live)%s\n" "$(c 2)" "$(r)"
   ps -eo pid,ni,%cpu,%mem,comm --sort=-ni --no-headers \
-    | awk '$2>0 {comm=$5; for(i=6;i<=NF;i++) comm=comm" "$i; printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%
-", comm, $1, $2, $3, $4; if(++c==8) exit}'
+    | awk '$2>0 {comm=$5; for(i=6;i<=NF;i++) comm=comm" "$i; printf "%-18s %-6s NI:%3s CPU:%5s%% MEM:%5s%%\n", comm, $1, $2, $3, $4; if(++c==8) exit}'
 }
 
-print_historical(){ printf "
-%sHistorical hogs (since start)%s
-" "$(c 5)" "$(r)"; if [ ${#cpu_accu[@]} -eq 0 ]; then echo "(no samples yet)"; return; fi; for k in "${!cpu_accu[@]}"; do printf "%s %s
-" "${cpu_accu[$k]}" "$k"; done | sort -nr | head -n 6 | while read -r score name; do cpu_int=$(awk -v s="$score" 'BEGIN{printf "%.1f", s/10}'); printf "%-18s CPU∫:%6.1f  maxCPU:%5s%%  maxMEM:%5s%%
-" "$name" "$cpu_int" "${max_cpu[$name]:-0}" "${max_mem[$name]:-0}"; done; }
+print_historical(){ printf "\n%sHistorical hogs (since start)%s\n" "$(c 5)" "$(r)"; if [ ${#cpu_accu[@]} -eq 0 ]; then echo "(no samples yet)"; return; fi; for k in "${!cpu_accu[@]}"; do printf "%s %s\n" "${cpu_accu[$k]}" "$k"; done | sort -nr | head -n 6 | while read -r score name; do cpu_int=$(awk -v s="$score" 'BEGIN{printf "%.1f", s/10}'); printf "%-18s CPU∫:%6.1f  maxCPU:%5s%%  maxMEM:%5s%%\n" "$name" "$cpu_int" "${max_cpu[$name]:-0}" "${max_mem[$name]:-0}"; done; }
 
-print_per_core(){ [ "$percore" -eq 1 ] || return; printf "
-%sPer-core CPU%s
-" "$(c 4)" "$(r)"; while read -r label user nice system idle iowait irq softirq steal _; do case "$label" in cpu) continue ;; cpu*) ;; *) continue;; esac; core=${label#cpu}; total=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle_all=$((idle+iowait)); prev_t=${prev_core_total[$core]:-0}; prev_i=${prev_core_idle[$core]:-0}; if [ "$prev_t" -eq 0 ]; then pct=0; else dt=$((total-prev_t)); di=$((idle_all-prev_i)); pct=$(awk -v dt="$dt" -v di="$di" 'BEGIN{if(dt<=0){print 0}else{printf "%.0f", (1-di/dt)*100}}'); fi; prev_core_total[$core]=$total; prev_core_idle[$core]=$idle_all; printf "cpu%-3s " "$core"; bar "$pct" 20; printf "
-"; done < /proc/stat; }
+print_per_core(){ [ "$percore" -eq 1 ] || return; printf "\n%sPer-core CPU%s\n" "$(c 4)" "$(r)"; while read -r label user nice system idle iowait irq softirq steal _; do case "$label" in cpu) continue ;; cpu*) ;; *) continue;; esac; core=${label#cpu}; total=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle_all=$((idle+iowait)); prev_t=${prev_core_total[$core]:-0}; prev_i=${prev_core_idle[$core]:-0}; if [ "$prev_t" -eq 0 ]; then pct=0; else dt=$((total-prev_t)); di=$((idle_all-prev_i)); pct=$(awk -v dt="$dt" -v di="$di" 'BEGIN{if(dt<=0){print 0}else{printf "%.0f", (1-di/dt)*100}}'); fi; prev_core_total[$core]=$total; prev_core_idle[$core]=$idle_all; printf "cpu%-3s " "$core"; bar "$pct" 20; printf "\n"; done < /proc/stat; }
 
 delta_counter(){ local prev="$1" cur="$2"; if [ -z "$prev" ]; then _delta=0; else _delta=$((cur-prev)); fi; }
 
@@ -1008,20 +1000,16 @@ disk_net_lines(){
 }
 
 print_io_net(){
-  printf "%sIO%s   R:%5.1fMB/s W:%5.1fMB/s (peak %5.1f/%5.1f)   %sNET%s RX:%5.1fMb/s TX:%5.1fMb/s (peak %5.1f/%5.1f)
-"     "$(c 6)" "$(r)" "$last_rd_mb" "$last_wr_mb" "$peak_rd_mb" "$peak_wr_mb" "$(c 6)" "$(r)" "$last_rx_mbps" "$last_tx_mbps" "$peak_rx_mbps" "$peak_tx_mbps"
+  printf "%sIO%s   R:%5.1fMB/s W:%5.1fMB/s (peak %5.1f/%5.1f)   %sNET%s RX:%5.1fMb/s TX:%5.1fMb/s (peak %5.1f/%5.1f)\n"     "$(c 6)" "$(r)" "$last_rd_mb" "$last_wr_mb" "$peak_rd_mb" "$peak_wr_mb" "$(c 6)" "$(r)" "$last_rx_mbps" "$last_tx_mbps" "$peak_rx_mbps" "$peak_tx_mbps"
 }
 
-print_footer(){ runtime=$(( $(date +%s) - start_ts )); printf "
-%sTip:%s SRPS_SYSMON_INTERVAL=2 to slow refresh; SRPS_SYSMON_FOCUS='node' to focus; Ctrl+C to exit.  Uptime: %ss
-" "$(c 6)" "$(r)" "$runtime"; }
+print_footer(){ runtime=$(( $(date +%s) - start_ts )); printf "\n%sTip:%s SRPS_SYSMON_INTERVAL=2 to slow refresh; SRPS_SYSMON_FOCUS='node' to focus; Ctrl+C to exit.  Uptime: %ss\n" "$(c 6)" "$(r)" "$runtime"; }
 
 prev_total=""; prev_idle=""; json_warmup=0; adapt_interval_if_needed
 
 while true; do
 snapshot=$(ps -eo pid,ni,pcpu,pmem,comm --sort=-pcpu --no-headers \
-  | awk 'NR<=8 {comm=$5; for(i=6;i<=NF;i++) comm=comm" "$i; printf "%s|%s|%s|%s|%s
-",$1,$2,$3,$4,comm}')
+  | awk 'NR<=8 {comm=$5; for(i=6;i<=NF;i++) comm=comm" "$i; printf "%s|%s|%s|%s|%s\n",$1,$2,$3,$4,comm}')
   view="$snapshot"
 
   while IFS='|' read -r pid ni cpu mem comm; do
@@ -1125,8 +1113,7 @@ snapshot=$(ps -eo pid,ni,pcpu,pmem,comm --sort=-pcpu --no-headers \
     nr_w=$(cat /proc/sys/fs/inotify/nr_watches 2>/dev/null || echo 0)
     inotify_json=$(printf '{"max_user_watches":%s,"max_user_instances":%s,"nr_watches":%s}' "$max_w" "$max_i" "$nr_w")
 
-    json_blob=$(printf '{"timestamp":%s,"cpu":%s,"mem":%s,"top":%s,"historical":%s,"per_core":%s,"io":%s,"temps":%s,"inotify":%s,"cgroups":%s,"gpu":%s,"battery":%s}
-'       "$(date +%s)" "$last_cpu_pct" "$mem_pct_last" "$top_json" "$hist_json" "$percore_json" "$io_json" "$temps_json" "$inotify_json" "$cgroup_json" "$gpu_json" "$batt_json")
+    json_blob=$(printf '{"timestamp":%s,"cpu":%s,"mem":%s,"top":%s,"historical":%s,"per_core":%s,"io":%s,"temps":%s,"inotify":%s,"cgroups":%s,"gpu":%s,"battery":%s}\n'       "$(date +%s)" "$last_cpu_pct" "$mem_pct_last" "$top_json" "$hist_json" "$percore_json" "$io_json" "$temps_json" "$inotify_json" "$cgroup_json" "$gpu_json" "$batt_json")
     if [ -n "$json_file" ]; then
       if [ "$json_stream" = "1" ]; then printf "%s" "$json_blob" >>"$json_file"; else printf "%s" "$json_blob" >"$json_file"; fi
     else
@@ -1159,6 +1146,22 @@ EOF
             aarch64|arm64) goarch="arm64" ;;
             *) goarch="$(uname -m)" ;;
         esac
+
+        # 0) Try local source (dev mode)
+        if [ -f "go.mod" ] && [ -d "cmd/sysmon" ]; then
+             print_info "Detected local source; building sysmon-go from current directory..."
+             local tmpbin
+             tmpbin=$(mktemp)
+             if out=$(CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$tmpbin" ./cmd/sysmon 2>&1); then
+                 sudo install -m 0755 "$tmpbin" "$sysmon_go"
+                 rm -f "$tmpbin"
+                 print_success "Built sysmon-go from local source"
+                 return 0
+             else
+                 rm -f "$tmpbin"
+                 print_warning "Local build failed: $out"
+             fi
+        fi
 
         # 1) Try prebuilt release asset
         local bin_url="https://github.com/Dicklesworthstone/system_resource_protection_script/releases/download/${build_ref}/sysmon-linux-${goarch}"
@@ -1214,11 +1217,12 @@ EOF
             sudo ln -sf "$sysmon_go" "$sysmon"
             print_success "sysmon-go installed and linked to $sysmon"
         else
-            die "sysmon-go download/build failed (see logs above); aborting instead of falling back to legacy sysmon. Set ALLOW_BASH_SYSMON=1 if you explicitly want the old bash TUI."
+            print_warning "sysmon-go download/build failed; falling back to legacy bash sysmon."
+            install_bash_sysmon "$sysmon"
         fi
     fi
 
-    # Optional legacy fallback only when explicitly allowed
+    # Optional legacy fallback only when explicitly allowed (preserved for backward compat logic if needed, though caught above)
     if [ ! -x "$sysmon" ] && [ "${ALLOW_BASH_SYSMON:-0}" = "1" ]; then
         install_bash_sysmon "$sysmon"
     fi
@@ -1330,7 +1334,7 @@ fi
 if [ "${SRPS_JSON:-0}" = "1" ]; then
   trimmed=0
   if [ "$node_count" -gt "$MAX_NODE" ] 2>/dev/null; then
-    pids=$(ps -eo pid,lstart,comm | grep -E "node(\.exe)?$" | sort -k2,6 | awk '{print $1}')
+    pids=$(ps -eo pid,etimes,comm | grep -E "node(\.exe)?$" | sort -rn -k2 | awk '{print $1}')
     keep=$MAX_NODE
     kill_list=$(echo "$pids" | head -n -"${keep}" 2>/dev/null || true)
     if [ -n "$kill_list" ]; then
@@ -1354,7 +1358,7 @@ printf "%s%sCursor/Node guard%s (MAX_NODE=%s MAX_CPU=%s)\n" "$(b)" "$(c 6)" "$(r
 
 if [ "$node_count" -gt "$MAX_NODE" ] 2>/dev/null; then
     echo "$(c 1)[$(date)] Node swarm detected: $node_count (limit $MAX_NODE). Trimming oldest...$(r)"
-    pids=$(ps -eo pid,lstart,comm | grep -E "node(\.exe)?$" | sort -k2,6 | awk '{print $1}')
+    pids=$(ps -eo pid,etimes,comm | grep -E "node(\.exe)?$" | sort -rn -k2 | awk '{print $1}')
     keep=$MAX_NODE
     kill_list=$(echo "$pids" | head -n -"${keep}" 2>/dev/null || true)
     if [ -n "$kill_list" ]; then
@@ -1710,7 +1714,17 @@ detect_shell_rc() {
 
     # 2. Check current user shell
     local shell_name
-    shell_name=$(basename "${SHELL:-bash}")
+    if [ -n "${SUDO_USER:-}" ] && command -v getent >/dev/null 2>&1; then
+        local sudo_shell
+        sudo_shell=$(getent passwd "$SUDO_USER" | cut -d: -f7)
+        if [ -n "$sudo_shell" ]; then
+            shell_name=$(basename "$sudo_shell")
+        else
+            shell_name=$(basename "${SHELL:-bash}")
+        fi
+    else
+        shell_name=$(basename "${SHELL:-bash}")
+    fi
 
     if [ "$shell_name" = "zsh" ] && [ -f "$HOME/.zshrc" ]; then
         SHELL_RC="$HOME/.zshrc"

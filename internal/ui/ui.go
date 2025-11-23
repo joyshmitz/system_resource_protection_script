@@ -17,6 +17,52 @@ import (
 	"github.com/Dicklesworthstone/system_resource_protection_script/internal/sampler"
 )
 
+const (
+	historyPoints = 60
+	primaryColor  = "#00D7FF" // Cyan
+	secondaryColor= "#FF005F" // Pink/Red
+	successColor  = "#00FF87" // Green
+	warningColor  = "#FFD700" // Gold
+	borderColor   = "#444444" // Dark Grey
+	labelColor    = "#888888" // Light Grey
+)
+
+// Styles
+var (
+	// Text Styles
+	titleStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color(primaryColor)).
+		Padding(0, 1).
+		Bold(true)
+
+	subtleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(labelColor))
+	
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(primaryColor)).Bold(true)
+
+	headerStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(lipgloss.Color(borderColor)).
+		MarginBottom(1)
+
+	// Container Styles
+	cardStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(borderColor)).
+		Padding(0, 1).
+		MarginRight(1).
+		MarginBottom(1)
+
+	// Metrics Styles
+	gaugeLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(primaryColor)).Bold(true)
+	valStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	
+	// Table Styles
+tableHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(primaryColor)).Bold(true)
+rowStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#EEEEEE"))
+dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+)
+
 // Model renders live samples from the sampler.
 type Model struct {
 	cfg       config.Config
@@ -31,8 +77,17 @@ type Model struct {
 	inputMode bool
 	inputBuf  []rune
 
-	perCoreHist map[int][]float64
-	jsonFile    string
+	// History for sparklines
+	cpuHist       []float64
+	memHist       []float64
+	netRxHist     []float64
+	netTxHist     []float64
+diskReadHist  []float64
+diskWriteHist []float64
+
+	perCoreHist   map[int][]float64
+
+	jsonFile string
 }
 
 func New(cfg config.Config) *Model {
@@ -54,7 +109,6 @@ func New(cfg config.Config) *Model {
 // Messages
 type (
 	tickMsg   struct{}
-	sampleMsg model.Sample
 )
 
 func tickCmd() tea.Cmd { return tea.Tick(time.Second/5, func(time.Time) tea.Msg { return tickMsg{} }) }
@@ -103,7 +157,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputMode = true
 			m.inputBuf = nil
 		case "o":
-			// toggle JSON stream to file if env set
 			if m.jsonFile != "" {
 				m.jsonFile = ""
 			} else if f := os.Getenv("SRPS_SYSMON_JSON_FILE"); f != "" {
@@ -115,7 +168,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case samp, ok := <-m.stream:
 			if ok {
 				m.latest = samp
-				m.recordPerCore(samp.CPU.PerCore)
+				m.recordHistory(samp)
 				m.maybeWriteJSON(samp)
 			}
 		default:
@@ -125,169 +178,319 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Styles
-var (
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
-	subtleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	labelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
-	gaugeFill   = "█"
-	gaugeEmpty  = "░"
-	cardStyle   = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("60")).
-			Padding(0, 1).
-			MarginRight(1)
-)
+func (m *Model) recordHistory(s model.Sample) {
+	appendHist := func(hist []float64, val float64) []float64 {
+		hist = append(hist, val)
+		if len(hist) > historyPoints {
+			hist = hist[len(hist)-historyPoints:]
+		}
+		return hist
+	}
+
+	m.cpuHist = appendHist(m.cpuHist, s.CPU.Total)
+	
+	memPct := pct(s.Memory.UsedBytes, s.Memory.TotalBytes)
+	m.memHist = appendHist(m.memHist, memPct)
+
+	m.netRxHist = appendHist(m.netRxHist, s.IO.NetRxMbps)
+	m.netTxHist = appendHist(m.netTxHist, s.IO.NetTxMbps)
+	m.diskReadHist = appendHist(m.diskReadHist, s.IO.DiskReadMBs)
+	m.diskWriteHist = appendHist(m.diskWriteHist, s.IO.DiskWriteMBs)
+
+	for i, v := range s.CPU.PerCore {
+		buf := m.perCoreHist[i]
+		buf = append(buf, v)
+		if len(buf) > historyPoints {
+			buf = buf[len(buf)-historyPoints:]
+		}
+		m.perCoreHist[i] = buf
+	}
+}
 
 func (m *Model) View() string {
+	if m.width == 0 {
+		return "Loading..."
+	}
 	s := m.latest
-	header := titleStyle.Render("System Resource Monitor (Go)") + "  " +
-		subtleStyle.Render(s.Timestamp.Format("Mon Jan 2 15:04:05 MST 2006")) +
-		"  " + subtleStyle.Render(fmt.Sprintf("[sort:%s filter:%s]", m.sortKey, displayFilter(m)))
 
-	cpuCard := card("CPU",
-		fmt.Sprintf("%s  load %.2f %.2f %.2f",
-			gaugeBar(s.CPU.Total, 28),
-			s.CPU.Load1, s.CPU.Load5, s.CPU.Load15))
+	// --- Header ---
+	filterTxt := ""
+	if m.filter != "" || m.inputMode {
+		filterTxt = fmt.Sprintf(" Filter: %s", displayFilter(m))
+	}
+	
+	headerLeft := titleStyle.Render(" SRPS SYSMON ")
+	headerMid := subtleStyle.Render(fmt.Sprintf(" Sort: %s | Interval: %s |%s", 
+		strings.ToUpper(m.sortKey), 
+		m.cfg.Interval, 
+		filterTxt))
+	headerRight := subtleStyle.Render(s.Timestamp.Format("15:04:05"))
+	
+	// Calculate padding for right alignment
+	gap := m.width - lipgloss.Width(headerLeft) - lipgloss.Width(headerMid) - lipgloss.Width(headerRight) - 2
+	if gap < 1 { gap = 1 }
+	
+	header := lipgloss.JoinHorizontal(lipgloss.Center, 
+		headerLeft, 
+		" ", 
+		headerMid, 
+		strings.Repeat(" ", gap), 
+		headerRight)
+	
+	header = headerStyle.Width(m.width).Render(header)
 
-	memPct := pct(s.Memory.UsedBytes, s.Memory.TotalBytes)
-	memCard := card("Memory",
-		fmt.Sprintf("%s  %.1f/%.1f GiB | Swap %3.0f%%",
-			gaugeBar(memPct, 28),
-			bytesToGiB(s.Memory.UsedBytes),
-			bytesToGiB(s.Memory.TotalBytes),
-			pct(s.Memory.SwapUsed, s.Memory.SwapTotal)))
+	// --- Row 1: Vitals (CPU, MEM, SWAP, LOAD) ---
+	// CPU Section
+	cpuGauge := renderGauge("CPU", s.CPU.Total, primaryColor)
+	cpuGraph := renderSparklinePct(m.cpuHist, 20, primaryColor)
+	cpuBlock := lipgloss.JoinHorizontal(lipgloss.Bottom, cpuGauge, "  ", cpuGraph)
+	cpuCard := cardStyle.Render(cpuBlock)
 
-	io := s.IO
-	ioCard := card("IO / NET",
-		fmt.Sprintf("Disk R/W: %.1f / %.1f MB/s   Net RX/TX: %.1f / %.1f Mb/s",
-			io.DiskReadMBs, io.DiskWriteMBs, io.NetRxMbps, io.NetTxMbps))
+	// Memory Section
+	memVal := pct(s.Memory.UsedBytes, s.Memory.TotalBytes)
+	memGauge := renderGauge("MEM", memVal, "#BD93F9") // Purple
+	memGraph := renderSparklinePct(m.memHist, 20, "#BD93F9")
+	memDetails := subtleStyle.Render(fmt.Sprintf("%.1f/%.1f GB", bytesToGiB(s.Memory.UsedBytes), bytesToGiB(s.Memory.TotalBytes)))
+	memBlock := lipgloss.JoinVertical(lipgloss.Left, 
+		lipgloss.JoinHorizontal(lipgloss.Bottom, memGauge, "  ", memGraph),
+		memDetails)
+	memCard := cardStyle.Render(memBlock)
 
-	gpuCard := ""
+	// Swap & Load
+	swapVal := pct(s.Memory.SwapUsed, s.Memory.SwapTotal)
+	swapGauge := renderGauge("SWAP", swapVal, warningColor)
+	loadStr := fmt.Sprintf("LOAD: %.2f %.2f %.2f", s.CPU.Load1, s.CPU.Load5, s.CPU.Load15)
+	miscBlock := lipgloss.JoinVertical(lipgloss.Left, swapGauge, "\n", valStyle.Render(loadStr))
+	miscCard := cardStyle.Render(miscBlock)
+
+	row1 := lipgloss.JoinHorizontal(lipgloss.Top, cpuCard, memCard, miscCard)
+
+	// --- Row 2: Throughput & Hardware (NET, DISK, GPU, BATT) ---
+	
+	// Network
+netRxSpark := renderSparkline(m.netRxHist, 15, successColor)
+netTxSpark := renderSparkline(m.netTxHist, 15, "#0077FF") // Blue
+netBlock := lipgloss.JoinVertical(lipgloss.Left,
+		fmt.Sprintf("%s RX %5.1f Mb/s %s", valStyle.Foreground(lipgloss.Color(successColor)).Render("↓"), s.IO.NetRxMbps, netRxSpark),
+		fmt.Sprintf("%s TX %5.1f Mb/s %s", valStyle.Foreground(lipgloss.Color("#0077FF")).Render("↑"), s.IO.NetTxMbps, netTxSpark),
+	)
+netCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("NETWORK"), netBlock))
+
+	// Disk
+diskRSpark := renderSparkline(m.diskReadHist, 15, warningColor)
+diskWSpark := renderSparkline(m.diskWriteHist, 15, secondaryColor)
+diskBlock := lipgloss.JoinVertical(lipgloss.Left,
+		fmt.Sprintf("R %5.1f MB/s %s", s.IO.DiskReadMBs, diskRSpark),
+		fmt.Sprintf("W %5.1f MB/s %s", s.IO.DiskWriteMBs, diskWSpark),
+	)
+diskCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("DISK I/O"), diskBlock))
+
+	// GPU & Battery
+	extraContent := ""
 	if len(s.GPUs) > 0 {
-		lines := make([]string, 0, len(s.GPUs))
 		for _, g := range s.GPUs {
-			lines = append(lines,
-				fmt.Sprintf("%s %4.0f%% mem:%4.0f/%-4.0fMiB %2.0f°C",
-					truncate(g.Name, 10), g.Util, g.MemUsedMB, g.MemTotalMB, g.TempC))
+			extraContent += fmt.Sprintf("GPU: %s\nUse: %3.0f%% | %2.0f°C\nMem: %3.0f/%3.0f MB\n", 
+				truncate(g.Name, 10), g.Util, g.TempC, g.MemUsedMB, g.MemTotalMB)
 		}
-		gpuCard = card("GPU", strings.Join(lines, "\n"))
 	}
-
-	battCard := ""
 	if s.Battery.Percent > 0 {
-		battCard = card("Battery",
-			fmt.Sprintf("%.0f%% (%s)", s.Battery.Percent, s.Battery.State))
+		if extraContent != "" { extraContent += "\n" }
+		extraContent += fmt.Sprintf("BATT: %.0f%% (%s)", s.Battery.Percent, s.Battery.State)
+	}
+	if extraContent == "" { extraContent = subtleStyle.Render("No GPU/Batt") }
+	extraCard := cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("HARDWARE"), extraContent))
+
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, netCard, diskCard, extraCard)
+
+	// --- Row 3: Main Content (Procs left, PerCore right) ---
+	
+	// Process List (Left Column)
+	// Calculate available height for table
+	availHeight := m.height - lipgloss.Height(header) - lipgloss.Height(row1) - lipgloss.Height(row2) - 2
+	if availHeight < 5 { availHeight = 5 }
+	
+	procTable := renderProcessTable(m.sortAndFilter(s.Top), availHeight, primaryColor)
+	procCard := cardStyle.Width(55).Height(availHeight).Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("TOP PROCESSES"), procTable))
+
+	// Right Column (Throttled + PerCore)
+	rightColContent := ""
+	
+	// Throttled
+	if len(s.Throttled) > 0 {
+		throttledTable := renderProcessTable(m.sortAndFilter(s.Throttled), 5, secondaryColor)
+		rightColContent = lipgloss.JoinVertical(lipgloss.Left, 
+			labelStyle.Foreground(lipgloss.Color(secondaryColor)).Render("THROTTLED (Nice > 0)"), 
+			throttledTable,
+			"")
 	}
 
-	topTable := card("Top CPU",
-		renderTable([]string{"cmd", "pid", "ni", "cpu", "mem"},
-			limitProcs(m.sortAndFilter(s.Top), 20)))
+	// Per Core Grid
+	coreBlock := renderCoreGrid(m.perCoreHist, 25) // Width of sparklines
+	rightColContent = lipgloss.JoinVertical(lipgloss.Left, rightColContent, labelStyle.Render("CPU CORES"), coreBlock)
+	
+	rightCard := cardStyle.Render(rightColContent)
 
-	throttledTable := card("Throttled (nice>0)",
-		renderTable([]string{"cmd", "pid", "ni", "cpu", "mem"},
-			limitProcs(m.sortAndFilter(s.Throttled), 12)))
+	row3 := lipgloss.JoinHorizontal(lipgloss.Top, procCard, rightCard)
 
-	cgTable := ""
-	if len(s.Cgroups) > 0 {
-		rows := make([]string, 0, min(6, len(s.Cgroups)))
-		for i := 0; i < min(6, len(s.Cgroups)); i++ {
-			cg := s.Cgroups[i]
-			rows = append(rows, fmt.Sprintf("%-18s %5.1f%%", truncate(cg.Name, 18), cg.CPU))
-		}
-		cgTable = card("Top cgroups", strings.Join(rows, "\n"))
-	}
-
-	perCoreCard := ""
-	if len(s.CPU.PerCore) > 0 {
-		lines := make([]string, 0, min(8, len(s.CPU.PerCore)))
-		for i := 0; i < min(8, len(s.CPU.PerCore)); i++ {
-			lines = append(lines, fmt.Sprintf("cpu%-2d %s", i, sparkline(m.perCoreHist[i], 20)))
-		}
-		perCoreCard = card("Per-core", strings.Join(lines, "\n"))
-	}
-
-	columns := []string{cpuCard, memCard, ioCard}
-	if gpuCard != "" {
-		columns = append(columns, gpuCard)
-	}
-	if battCard != "" {
-		columns = append(columns, battCard)
-	}
-	if perCoreCard != "" {
-		columns = append(columns, perCoreCard)
-	}
-
-	line1 := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
-	line2 := lipgloss.JoinHorizontal(lipgloss.Top, topTable, throttledTable, cgTable)
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, line1, line2)
+	return lipgloss.JoinVertical(lipgloss.Left, header, row1, row2, row3)
 }
 
-// Helpers
-func gaugeBar(pct float64, width int) string {
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 100 {
-		pct = 100
-	}
+// --- Render Helpers ---
+
+func renderGauge(label string, pct float64, color string) string {
+	width := 20
 	filled := int((pct / 100) * float64(width))
-	if filled > width {
-		filled = width
+	if filled > width { filled = width }
+	if filled < 0 { filled = 0 }
+	
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	
+	// Apply color gradient logic or solid color
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	if pct > 90 {
+		style = style.Foreground(lipgloss.Color(secondaryColor)) // Alert color
 	}
-	return fmt.Sprintf("[%s%s] %5.1f%%",
-		strings.Repeat(gaugeFill, filled),
-		strings.Repeat(gaugeEmpty, width-filled),
-		pct)
+	
+	return lipgloss.JoinVertical(lipgloss.Left, 
+		gaugeLabelStyle.Render(label),
+		style.Render(bar) + fmt.Sprintf(" %.0f%%", pct),
+	)
 }
 
-func card(title, body string) string {
-	titleStr := labelStyle.Render(title)
-	content := titleStr + "\n" + body
-	return cardStyle.Render(content)
-}
+func renderSparkline(values []float64, width int, color string) string {
+	if len(values) == 0 {
+		return strings.Repeat(" ", width)
+	}
+	// Take last N values
+	if len(values) > width {
+		values = values[len(values)-width:]
+	}
 
-func renderTable(headers []string, rows []model.Process) string {
-	max := len(rows)
+	// Find max for auto-scaling
+	max := 0.0
+	for _, v := range values {
+		if v > max {
+			max = v
+		}
+	}
+	if max == 0 {
+		max = 1 // Avoid divide by zero, render flat line
+	}
+	
+	chars := []rune(" ▂▃▄▅▆▇█")
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-18s %-6s %-3s %-6s %-6s\n", headers[0], headers[1], headers[2], headers[3], headers[4])
-	for i := 0; i < max; i++ {
-		r := rows[i]
-		fmt.Fprintf(&b, "%-18s %-6d %3d %6.1f %6.1f\n",
-			truncate(r.Command, 18), r.PID, r.Nice, r.CPU, r.Memory)
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	
+	for _, v := range values {
+		// Normalize 0-1 based on max
+		ratio := v / max
+		idx := int(ratio * float64(len(chars)-1))
+		if idx < 0 { idx = 0 }
+		if idx >= len(chars) { idx = len(chars) - 1 }
+		b.WriteRune(chars[idx])
 	}
-	return strings.TrimRight(b.String(), "\n")
+	
+	// Pad left if not enough data
+	padding := width - len(values)
+	if padding > 0 {
+		return strings.Repeat(" ", padding) + style.Render(b.String())
+	}
+	return style.Render(b.String())
 }
 
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+func renderSparklinePct(values []float64, width int, color string) string {
+	if len(values) == 0 {
+		return strings.Repeat(" ", width)
 	}
-	return string(r[:n-1]) + "…"
+	// Take last N values
+	if len(values) > width {
+		values = values[len(values)-width:]
+	}
+	
+	chars := []rune(" ▂▃▄▅▆▇█")
+	var b strings.Builder
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	
+	for _, v := range values {
+		// Normalize 0-100 fixed scale
+		idx := int((v / 100.0) * float64(len(chars)-1))
+		if idx < 0 { idx = 0 }
+		if idx >= len(chars) { idx = len(chars) - 1 }
+		b.WriteRune(chars[idx])
+	}
+	
+	// Pad left if not enough data
+	padding := width - len(values)
+	if padding > 0 {
+		return strings.Repeat(" ", padding) + style.Render(b.String())
+	}
+	return style.Render(b.String())
 }
 
-func pct(used, total uint64) float64 {
-	if total == 0 {
-		return 0
+func renderProcessTable(procs []model.Process, height int, highlightColor string) string {
+	var b strings.Builder
+	
+	// Header
+	fmt.Fprintf(&b, "% -18s %6s %4s %5s %5s\n", "COMMAND", "PID", "NI", "CPU%", "MEM%")
+	
+	count := 0
+	for _, p := range procs {
+		if count >= height-1 { break } // -1 for header
+		
+		cmd := truncate(p.Command, 18)
+		line := fmt.Sprintf("% -18s %6d %4d %5.1f %5.1f", cmd, p.PID, p.Nice, p.CPU, p.Memory)
+		
+		style := rowStyle
+		if p.Nice > 0 {
+			style = style.Foreground(lipgloss.Color(secondaryColor))
+		} else if count == 0 {
+			style = style.Foreground(lipgloss.Color(highlightColor)).Bold(true)
+		} else if count%2 == 0 {
+			style = dimStyle
+		}
+		
+		b.WriteString(style.Render(line) + "\n")
+		count++
 	}
-	return float64(used) * 100 / float64(total)
+	return b.String()
 }
+
+func renderCoreGrid(hist map[int][]float64, width int) string {
+	// Create a simple grid. We assume we have hist points.
+	// Sort keys
+	var keys []int
+	for k := range hist { keys = append(keys, k) }
+	sort.Ints(keys)
+	
+	var lines []string
+	// 2 columns of cores
+	for i := 0; i < len(keys); i+=2 {
+		c1 := keys[i]
+		sp1 := renderSparklinePct(hist[c1], 10, primaryColor) // mini sparklines
+		line := fmt.Sprintf("%2d %s", c1, sp1)
+		
+		if i+1 < len(keys) {
+			c2 := keys[i+1]
+			sp2 := renderSparklinePct(hist[c2], 10, primaryColor)
+			line += fmt.Sprintf("   %2d %s", c2, sp2)
+		}
+		lines = append(lines, line)
+	}
+	
+	return strings.Join(lines, "\n")
+}
+
+// --- Utility ---
+
+func pct(used, total uint64) float64 { if total == 0 { return 0 }; return float64(used) * 100 / float64(total) }
 
 func bytesToGiB(b uint64) float64 { return float64(b) / (1024 * 1024 * 1024) }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+func truncate(s string, n int) string { if len(s) > n { return s[:n-1] + "…" }; return s }
 
-// Data helpers
 func (m *Model) sortAndFilter(rows []model.Process) []model.Process {
-	// copy to avoid mutating incoming slice
-	filtered := make([]model.Process, 0, len(rows))
+	// Filter
+	var filtered []model.Process
 	filterLower := strings.ToLower(m.filter)
 	for _, r := range rows {
 		if filterLower != "" && !strings.Contains(strings.ToLower(r.Command), filterLower) {
@@ -295,79 +498,27 @@ func (m *Model) sortAndFilter(rows []model.Process) []model.Process {
 		}
 		filtered = append(filtered, r)
 	}
-	// sort
-	switch m.sortKey {
-	case "mem":
-		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Memory > filtered[j].Memory })
-	default:
-		sort.Slice(filtered, func(i, j int) bool { return filtered[i].CPU > filtered[j].CPU })
-	}
+	// Sort
+	sort.Slice(filtered, func(i, j int) bool {
+		if m.sortKey == "mem" { return filtered[i].Memory > filtered[j].Memory }
+		return filtered[i].CPU > filtered[j].CPU
+	})
 	return filtered
 }
 
-func limitProcs(rows []model.Process, n int) []model.Process {
-	if len(rows) <= n {
-		return rows
-	}
-	return rows[:n]
-}
-
-func (m *Model) recordPerCore(per []float64) {
-	for i, v := range per {
-		buf := m.perCoreHist[i]
-		buf = append(buf, v)
-		if len(buf) > 60 {
-			buf = buf[len(buf)-60:]
-		}
-		m.perCoreHist[i] = buf
-	}
-}
-
-func sparkline(values []float64, width int) string {
-	if len(values) == 0 {
-		return ""
-	}
-	if len(values) > width {
-		values = values[len(values)-width:]
-	}
-	blocks := []rune("▁▂▃▄▅▆▇█")
-	var b strings.Builder
-	for _, v := range values {
-		level := int((v / 100) * float64(len(blocks)-1))
-		if level < 0 {
-			level = 0
-		}
-		if level >= len(blocks) {
-			level = len(blocks) - 1
-		}
-		b.WriteRune(blocks[level])
-	}
-	return b.String()
-}
+func displayFilter(m *Model) string { if m.inputMode { return "/" + string(m.inputBuf) }; return m.filter }
 
 func (m *Model) maybeWriteJSON(s model.Sample) {
-	if m.jsonFile == "" {
-		return
-	}
+	if m.jsonFile == "" { return }
 	f, err := os.OpenFile(m.jsonFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer f.Close()
-	enc := json.NewEncoder(f)
-	_ = enc.Encode(s)
-}
-
-func displayFilter(m *Model) string {
-	if m.inputMode {
-		return "/" + string(m.inputBuf)
-	}
-	return m.filter
+	_ = json.NewEncoder(f).Encode(s)
 }
 
 // RunTUI starts the Bubble Tea program.
 func RunTUI(cfg config.Config) error {
-	prog := tea.NewProgram(New(cfg), tea.WithAltScreen())
-	_, err := prog.Run()
+	p := tea.NewProgram(New(cfg), tea.WithAltScreen())
+	_, err := p.Run()
 	return err
 }
