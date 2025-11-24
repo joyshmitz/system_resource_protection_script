@@ -1163,6 +1163,17 @@ EOF
              fi
         fi
 
+        # 0.5) If ref is 'main', try to resolve 'latest' release tag for binary download
+        if [ "$build_ref" = "main" ] && command -v curl >/dev/null 2>&1; then
+            local latest_url
+            latest_url=$(curl -Ls -o /dev/null -w %{url_effective} "https://github.com/Dicklesworthstone/system_resource_protection_script/releases/latest")
+            if [[ "$latest_url" =~ /releases/tag/(.*)$ ]]; then
+                local resolved_tag="${BASH_REMATCH[1]}"
+                print_info "Resolved 'main' to latest release: $resolved_tag"
+                build_ref="$resolved_tag"
+            fi
+        fi
+
         # 1) Try prebuilt release asset
         local bin_url="https://github.com/Dicklesworthstone/system_resource_protection_script/releases/download/${build_ref}/sysmon-linux-${goarch}"
         local tmpbin
