@@ -1,5 +1,5 @@
 class Srps < Formula
-  desc "System Resource Protection Script (Ananicy-cpp + EarlyOOM + helpers)"
+  desc "System Resource Protection Script (Ananicy-cpp + helpers)"
   homepage "https://github.com/Dicklesworthstone/system_resource_protection_script"
   url "https://github.com/Dicklesworthstone/system_resource_protection_script/archive/refs/tags/v1.1.2.tar.gz"
   sha256 "d0e3ccbcfde506a3166f5953434706f138ff2b9c2c8216fd651935ad48d4e254"
@@ -24,7 +24,7 @@ class Srps < Formula
         srps-install --plan  # dry-run the installer
         srps-install         # run installer (prompts for sudo)
 
-      Note: installer makes system-wide changes (ananicy rules, EarlyOOM config, sysctl).
+      Note: installer makes system-wide changes (ananicy rules, sysctl).
     EOS
   end
 

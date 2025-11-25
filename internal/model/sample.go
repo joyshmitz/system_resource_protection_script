@@ -4,11 +4,11 @@ import "time"
 
 // CPU aggregates instantaneous CPU usage.
 type CPU struct {
-	Total    float64   // percent 0-100
-	PerCore  []float64 // per-core percent
-	Load1    float64
-	Load5    float64
-	Load15   float64
+	Total   float64   // percent 0-100
+	PerCore []float64 // per-core percent
+	Load1   float64
+	Load5   float64
+	Load15  float64
 }
 
 // Memory captures RAM and swap usage in bytes for precision.
@@ -38,8 +38,8 @@ type GPU struct {
 
 // Battery shows power state; absent if Percent == 0 and State is empty.
 type Battery struct {
-	Percent float64
-	State   string
+	Percent          float64
+	State            string
 	SecondsRemaining int64
 }
 
@@ -69,14 +69,6 @@ type Inotify struct {
 type Temp struct {
 	Zone string
 	Temp float64
-}
-
-// KillEvent represents a process kill action found in logs.
-type KillEvent struct {
-	Timestamp time.Time
-	PID       int
-	Command   string
-	Reason    string
 }
 
 // Sample is the full snapshot exchanged between sampler, UI, and JSON exporter.

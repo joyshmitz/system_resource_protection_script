@@ -2,7 +2,7 @@
 
 # 🛡️ System Resource Protection Script (SRPS)
 
-**Keep your Linux dev box (or WSL2) responsive under load with priority tuning, OOM protection, sysctl tweaks, and a polished TUI monitor.**
+**Keep your Linux dev box (or WSL2) responsive under load with priority tuning, sysctl tweaks, and a polished TUI monitor — without killing your workloads.**
 
 [![Linux](https://img.shields.io/badge/Linux-Debian%2FUbuntu-orange?logo=linux)](https://www.debian.org/)
 [![WSL2](https://img.shields.io/badge/WSL2-Supported-blue?logo=microsoft)](https://learn.microsoft.com/windows/wsl/)
@@ -19,11 +19,12 @@
 SRPS is a single script + helpers that assemble a tuned stack for developer/workstation responsiveness:
 
 - **ananicy-cpp** with curated rules for compilers, browsers, IDEs, language servers, containers, etc.
-- **EarlyOOM** configured to kill the right hogs before your WM/terminal die.
 - **Kernel (sysctl) tuning** for interactive workloads (swap, dirty ratios, inotify, TCP).
 - **Systemd manager limits** (especially for WSL2) to prevent FD/process explosions.
 - **Helper tools & aliases** for monitoring, throttling, diagnostics.
 - **Modern TUI monitor (`sysmon`)** written in Go (Bubble Tea) with live gauges, tables, per-core sparklines, filters, JSON/NDJSON export. Legacy bash TUI kept as fallback.
+
+**Safety-first philosophy:** SRPS never ships an automated process killer. Helpers are log/renice-only; the only termination tool is `kill-cursor`, and you must run it manually. If you choose to run an OOM daemon (e.g., earlyoom), use ultra-conservative thresholds (example below) so action happens only when the machine is effectively out of resources.
 
 Everything is idempotent, safe to re-run, and reversible via `--uninstall`.
 
@@ -76,13 +77,12 @@ bash install.sh --uninstall --yes
 
 ---
 
-## 🛠️ What Happens on Install (6 steps)
+## 🛠️ What Happens on Install (5 steps)
 1. **Build/Install ananicy-cpp** (if missing) and enable service.
 2. **Rules:** Replace/augment `/etc/ananicy.d` with community + SRPS rules (backup recorded in `.srps_backup`).
-3. **EarlyOOM:** Install if needed; write `/etc/default/earlyoom` with dev-friendly args; enable service.
-4. **Sysctl:** Apply `/etc/sysctl.d/99-system-resource-protection.conf` (swap, dirty ratios, inotify, net, max_map_count).
-5. **Systemd limits (WSL-friendly):** `/etc/systemd/system.conf.d/10-system-resource-protection.conf` with FD/NPROC bumps and accounting.
-6. **Helpers:** Install `sysmon` (Go TUI binary, with bash fallback), `check-throttled`, `cursor-guard`, `kill-cursor`, `srps-doctor`, `srps-reload-rules`, optional `srps-pull-rules`, `srps-report`; add shell aliases and completions.
+3. **Sysctl:** Apply `/etc/sysctl.d/99-system-resource-protection.conf` (swap, dirty ratios, inotify, net, max_map_count).
+4. **Systemd limits (WSL-friendly):** `/etc/systemd/system.conf.d/10-system-resource-protection.conf` with FD/NPROC bumps and accounting.
+5. **Helpers:** Install `sysmon` (Go TUI binary, with bash fallback), `check-throttled`, `cursor-guard` (log/renice-only), `kill-cursor` (manual), `srps-doctor`, `srps-reload-rules`, optional `srps-pull-rules`, `srps-report`; add shell aliases and completions.
 
 Re-running is safe: idempotent writes, backups preserved, services restarted as needed.
 
@@ -103,8 +103,7 @@ Re-running is safe: idempotent writes, backups preserved, services restarted as 
 ## ⚙️ Config & Flags
 
 - Optional config file: `./srps.conf` or `/etc/system-resource-protection.conf` or `-c /path`.
-- Feature toggles (env or config, 1=enable, 0=disable): `ENABLE_ANANICY`, `ENABLE_EARLYOOM`, `ENABLE_SYSCTL`, `ENABLE_WSL_LIMITS`, `ENABLE_TOOLS`, `ENABLE_SHELL_ALIASES`, `ENABLE_RULE_PULL`, `ENABLE_HTML_REPORT`.
-- EarlyOOM overrides: `SRPS_EARLYOOM_ARGS="..."`.
+- Feature toggles (env or config, 1=enable, 0=disable): `ENABLE_ANANICY`, `ENABLE_SYSCTL`, `ENABLE_WSL_LIMITS`, `ENABLE_TOOLS`, `ENABLE_SHELL_ALIASES`, `ENABLE_RULE_PULL`, `ENABLE_HTML_REPORT`.
 - Plan-only: `install.sh --plan` or `DRY_RUN=1`.
 - Go TUI JSON file stream: `SRPS_SYSMON_JSON_FILE=/tmp/sysmon.ndjson` and toggle inside TUI with `o`.
 
@@ -134,7 +133,6 @@ Non-TTY: auto emits JSON one-shot. `--json` / `--json-stream` also available.
 - `verify.sh <tag|latest>` downloads `install.sh` + `SHA256SUMS` and validates.
 - Installer always backs up existing configs before overwriting:
   - `/etc/ananicy.d` → `/etc/ananicy.d.backup-*` + `.srps_backup` marker
-  - `/etc/default/earlyoom` → `.srps-backup`
   - `/etc/sysctl.d/99-system-resource-protection.conf` → `.srps-backup`
   - `/etc/systemd/system.conf.d/10-system-resource-protection.conf` → `.srps-backup`
 - Go binary fetched from GitHub releases; if download fails, bash sysmon is installed instead.
@@ -144,7 +142,7 @@ Non-TTY: auto emits JSON one-shot. `--json` / `--json-stream` also available.
 ## 🧩 Helpers & Aliases
 
 - `sysmon` (Go TUI) / `sys` alias
-- `check-throttled`, `cursor-guard`, `kill-cursor`
+- `check-throttled`, `cursor-guard` (log/renice-only), `kill-cursor` (manual)
 - `srps-doctor`, `srps-reload-rules`, optional `srps-pull-rules`, `srps-report`
 - Aliases (when systemd-run available): `limited`, `limited-mem`, `cargo-limited`, `make-limited`, `node-limited`
 - Bash completion at `/etc/bash_completion.d/srps`
@@ -154,11 +152,9 @@ Non-TTY: auto emits JSON one-shot. `--json` / `--json-stream` also available.
 ## 🔧 Troubleshooting
 
 - Services inactive?  
-  `systemctl status ananicy-cpp earlyoom`
+`systemctl status ananicy-cpp`
 - Ananicy rules?  
   `ls /etc/ananicy.d` and inspect `00-default/99-system-resource-protection.rules`
-- EarlyOOM overlaps?  
-  Consider disabling `systemd-oomd` if double-kills appear.
 - GPU/ROCm timeouts?  
   `SRPS_SYSMON_GPU=0 sysmon` to skip probing.
 
@@ -170,7 +166,7 @@ Non-TTY: auto emits JSON one-shot. `--json` / `--json-stream` also available.
 bash install.sh --uninstall        # interactive
 bash install.sh --uninstall --yes  # non-interactive
 ```
-Restores backups where available, removes SRPS-owned files/helpers, leaves packages (`ananicy-cpp`, `earlyoom`) installed.
+Restores backups where available, removes SRPS-owned files/helpers, leaves packages (`ananicy-cpp`) installed.
 
 ---
 
@@ -185,12 +181,11 @@ Safe to re-run the installer any time; it re-applies configs, restores backups o
 | File/Dir | Notes |
 |----------|-------|
 | `/etc/ananicy.d` | Rules + `.srps_backup` marker; backups kept |
-| `/etc/default/earlyoom` | SRPS-owned or `.srps-backup` |
 | `/etc/sysctl.d/99-system-resource-protection.conf` | Kernel tuning |
 | `/etc/systemd/system.conf.d/10-system-resource-protection.conf` | Manager limits |
 | `/usr/local/bin/sysmon` | Go binary (link to `sysmon-go`) or bash fallback |
 | `/usr/local/bin/sysmon-go` | Downloaded TUI binary |
-| `/usr/local/bin/*` | Helpers: check-throttled, cursor-guard, kill-cursor, srps-* |
+| `/usr/local/bin/*` | Helpers: check-throttled, cursor-guard (log/renice-only), kill-cursor (manual), srps-* |
 | `/etc/bash_completion.d/srps` | Completion |
 | `~/.zshrc` / `~/.bashrc` | Aliases block (with markers) |
 
@@ -213,6 +208,6 @@ MIT License. See [LICENSE](LICENSE).
 <div align="center">
 
 **Responsive dev boxes. Zero drama.**  
-_Run `sysmon`, kick off a build, and keep your shell snappy._
+_Run `sysmon`, kick off a build, and keep your shell snappy. If you enable an OOM daemon, set it to act only when the system is effectively out of memory (e.g., `EARLYOOM_ARGS="-r 300 -m 1 -s 1 --avoid 'systemd|sshd|Xorg|gnome-shell|kwin|plasmashell' -p"`)._
 
 </div>

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -410,61 +409,4 @@ func (s *Sampler) readProcCgroup(pid int) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no cgroup")
-}
-
-// GetKillEvents parses recent earlyoom logs for kill actions.
-// Typical log: "... earlyoom[...]: Kill process 123 (chrome) score 900: low memory"
-func (s *Sampler) GetKillEvents() []model.KillEvent {
-	// We look for the specific phrase "Kill process"
-	out, err := runCmd(2*time.Second, "journalctl", "-u", "earlyoom", "-n", "50", "--no-pager")
-	if err != nil {
-		return nil
-	}
-
-	var events []model.KillEvent
-	// Regex to capture PID, Comm, Reason
-	// Matches: "Kill process 123 (comm) [score X]: reason" or similar variants depending on version
-	// Flexible regex: Kill process <pid> (<comm>)... : <reason>
-	re := regexp.MustCompile(`Kill process (\d+) \(([^)]+)\).*?: (.+)`)
-	
-	// Simple timestamp parsing is hard from journalctl raw output without specific flags.
-	// We'll try to parse the beginning of the line "Mmm dd HH:MM:SS"
-	// Or use "-o short-iso" for "YYYY-MM-DD..."
-	
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		matches := re.FindStringSubmatch(line)
-		if len(matches) == 4 {
-			// matches[1]=PID, matches[2]=Comm, matches[3]=Reason
-			pid, _ := strconv.Atoi(matches[1])
-			
-			// Try to extract time from the start of line
-			// Nov 23 19:12:39 ...
-			// We'll make a best-effort guess or just use "Unknown" if complex.
-			// Let's grab the first 15 chars
-			tsStr := ""
-			if len(line) > 15 {
-				tsStr = line[:15] // "Nov 23 19:12:39"
-			}
-			
-			// Parse time (assuming current year)
-			t, _ := time.Parse("Jan 2 15:04:05", tsStr)
-			if !t.IsZero() {
-				// Add current year
-				t = t.AddDate(time.Now().Year(), 0, 0)
-			}
-
-			events = append(events, model.KillEvent{
-				Timestamp: t,
-				PID:       pid,
-				Command:   matches[2],
-				Reason:    strings.TrimSpace(matches[3]),
-			})
-		}
-	}
-	// Sort newest first
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].Timestamp.After(events[j].Timestamp)
-	})
-	return events
 }

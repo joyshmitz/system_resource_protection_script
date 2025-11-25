@@ -1,5 +1,5 @@
 {
-  description = "System Resource Protection Script (SRPS): ananicy-cpp + earlyoom + helpers";
+  description = "System Resource Protection Script (SRPS): ananicy-cpp + helpers";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";

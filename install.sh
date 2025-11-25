@@ -4,7 +4,6 @@ set -euo pipefail
 # ============================================================
 #  System Resource Protection Script (SRPS)
 #  - Ananicy-cpp + curated rules
-#  - EarlyOOM tuned for dev workflows
 #  - Sysctl kernel tweaks
 #  - WSL2 / systemd limits (when applicable)
 #  - Monitoring + helper utilities
@@ -21,11 +20,10 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-TOTAL_STEPS=6
+TOTAL_STEPS=5
 
 # Config defaults (can be overridden by srps.conf or env)
 ENABLE_ANANICY=${ENABLE_ANANICY:-1}
-ENABLE_EARLYOOM=${ENABLE_EARLYOOM:-1}
 ENABLE_SYSCTL=${ENABLE_SYSCTL:-1}
 ENABLE_WSL_LIMITS=${ENABLE_WSL_LIMITS:-1}
 ENABLE_TOOLS=${ENABLE_TOOLS:-1}
@@ -421,8 +419,8 @@ configure_ananicy_rules() {
 {"name": "cmake","nice": 10,"sched": "batch","ioclass": "idle"}
 
 # --- Node.js and bundlers -------------------------------------
-{"name": "node","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 100}
-{"name": "node.exe","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 100}
+{"name": "node","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "node.exe","nice": 5,"sched": "batch","ioclass": "best-effort"}
 {"name": "npm","nice": 10,"sched": "batch","ioclass": "best-effort"}
 {"name": "yarn","nice": 10,"sched": "batch","ioclass": "best-effort"}
 {"name": "pnpm","nice": 10,"sched": "batch","ioclass": "best-effort"}
@@ -431,28 +429,28 @@ configure_ananicy_rules() {
 {"name": "vite","nice": 10,"sched": "batch","ioclass": "best-effort"}
 
 # --- Browsers (prevent them from dominating CPU/RAM) ----------
-{"name": "chrome","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "chromium","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "chrome.exe","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "brave","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "brave-browser","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "firefox","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "firefox-esr","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "msedge","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
+{"name": "chrome","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "chromium","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "chrome.exe","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "brave","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "brave-browser","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "firefox","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "firefox-esr","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "msedge","nice": 5,"sched": "batch","ioclass": "best-effort"}
 
 # --- Electron apps --------------------------------------------
-{"name": "slack","nice": 10,"sched": "batch","ioclass": "best-effort","oom_score_adj": 200}
-{"name": "discord","nice": 10,"sched": "batch","ioclass": "best-effort","oom_score_adj": 200}
-{"name": "teams","nice": 10,"sched": "batch","ioclass": "best-effort","oom_score_adj": 200}
-{"name": "zoom","nice": 5,"sched": "other","ioclass": "best-effort","oom_score_adj": 150}
+{"name": "slack","nice": 10,"sched": "batch","ioclass": "best-effort"}
+{"name": "discord","nice": 10,"sched": "batch","ioclass": "best-effort"}
+{"name": "teams","nice": 10,"sched": "batch","ioclass": "best-effort"}
+{"name": "zoom","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "code","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "vscode","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "electron","nice": 5,"sched": "batch","ioclass": "best-effort"}
 
 # --- Cursor IDE (balanced, but not allowed to eat machine) ----
-{"name": "cursor","nice": 2,"sched": "other","ioclass": "best-effort","oom_score_adj": 50}
-{"name": "Cursor","nice": 2,"sched": "other","ioclass": "best-effort","oom_score_adj": 50}
-{"name": "cursor.exe","nice": 2,"sched": "other","ioclass": "best-effort","oom_score_adj": 50}
+{"name": "cursor","nice": 2,"sched": "other","ioclass": "best-effort"}
+{"name": "Cursor","nice": 2,"sched": "other","ioclass": "best-effort"}
+{"name": "cursor.exe","nice": 2,"sched": "other","ioclass": "best-effort"}
 
 # --- Language servers & tooling -------------------------------
 {"name": "tsserver","nice": 8,"sched": "batch","ioclass": "best-effort"}
@@ -466,14 +464,14 @@ configure_ananicy_rules() {
 {"name": "python","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "python3","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "ipython","nice": 5,"sched": "other","ioclass": "best-effort"}
-{"name": "jupyter-notebook","nice": 5,"sched": "other","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "jupyter-lab","nice": 5,"sched": "other","ioclass": "best-effort","oom_score_adj": 150}
+{"name": "jupyter-notebook","nice": 5,"sched": "other","ioclass": "best-effort"}
+{"name": "jupyter-lab","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "pip","nice": 10,"sched": "batch","ioclass": "idle"}
 {"name": "pip3","nice": 10,"sched": "batch","ioclass": "idle"}
 
 # --- Java / JVM-heavy builds ---------------------------------
-{"name": "java","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
-{"name": "java.exe","nice": 5,"sched": "batch","ioclass": "best-effort","oom_score_adj": 150}
+{"name": "java","nice": 5,"sched": "batch","ioclass": "best-effort"}
+{"name": "java.exe","nice": 5,"sched": "batch","ioclass": "best-effort"}
 {"name": "gradle","nice": 10,"sched": "batch","ioclass": "idle"}
 {"name": "mvn","nice": 10,"sched": "batch","ioclass": "idle"}
 {"name": "sbt","nice": 10,"sched": "batch","ioclass": "idle"}
@@ -520,111 +518,9 @@ EOF
     fi
 }
 
-# --------------- Step 3: EarlyOOM Setup ----------------------
-install_and_configure_earlyoom() {
-    print_step "[3/${TOTAL_STEPS}] Installing and configuring EarlyOOM"
-
-    if [ "$ENABLE_EARLYOOM" -ne 1 ]; then
-        print_warning "EarlyOOM installation/configuration skipped by configuration."
-        return
-    fi
-
-    if ! command -v earlyoom >/dev/null 2>&1; then
-        apt_install earlyoom
-        print_success "earlyoom installed"
-    else
-        print_success "earlyoom already installed"
-    fi
-
-    if [ "$HAS_SYSTEMD" -eq 1 ] && systemctl is-active --quiet systemd-oomd.service 2>/dev/null; then
-        print_warning "systemd-oomd.service is active; earlyoom + systemd-oomd can overlap. Consider disabling one of them if you see double OOM handling."
-    fi
-
-    if sudo test -f /etc/default/earlyoom 2>/dev/null && ! sudo grep -q "system_resource_protection_script" /etc/default/earlyoom 2>/dev/null; then
-        if maybe_dry_run "Would back up /etc/default/earlyoom to /etc/default/earlyoom.srps-backup"; then
-            :
-        else
-            print_info "Backing up existing /etc/default/earlyoom to /etc/default/earlyoom.srps-backup"
-            sudo cp /etc/default/earlyoom /etc/default/earlyoom.srps-backup
-        fi
-    fi
-
-    print_info "Writing SRPS EarlyOOM preferences..."
-    
-    if [ "$ON_BATTERY" -eq 1 ]; then
-         print_warning "Battery detected: Configuring EarlyOOM for aggressive battery saving. This config is static; run install.sh again if you switch to a workstation setup."
-    fi
-
-    local earlyoom_args_value earlyoom_args_comment earlyoom_args_escaped
-
-    if [ -n "${SRPS_EARLYOOM_ARGS:-}" ]; then
-        if printf '%s' "$SRPS_EARLYOOM_ARGS" | grep -q $'\n'; then
-            print_warning "SRPS_EARLYOOM_ARGS contains newlines; collapsing to a single line."
-            earlyoom_args_value=$(printf '%s' "$SRPS_EARLYOOM_ARGS" | tr '\n' ' ')
-        else
-            earlyoom_args_value="$SRPS_EARLYOOM_ARGS"
-        fi
-
-        if [ -z "${earlyoom_args_value//[[:space:]]/}" ]; then
-            print_warning "SRPS_EARLYOOM_ARGS is empty after cleanup; falling back to SRPS defaults."
-            earlyoom_args_value=""
-        else
-            earlyoom_args_comment="# Using custom EARLYOOM_ARGS from SRPS_EARLYOOM_ARGS"
-        fi
-    fi
-
-    if [ -z "${earlyoom_args_value:-}" ]; then
-        if [ "$ON_BATTERY" -eq 1 ]; then
-            earlyoom_args_comment="# Default SRPS configuration (laptop/battery: slightly earlier intervention)"
-            earlyoom_args_value="-r 300 -m 4 -s 8 \
-  --avoid 'Xorg|gnome-shell|systemd|sshd|sway|wayland|plasmashell|kwin_x11|kwin_wayland|code|vscode' \
-  --prefer 'chrome|chromium|firefox|brave|msedge|cargo|rustc|node|npm|yarn|pnpm|java|python3?|jupyter.*|cursor|slack|discord|teams|zoom' \
-  --ignore-root-user -p"
-        else
-            earlyoom_args_comment="# Default SRPS configuration (tuned for interactive dev workloads)"
-            earlyoom_args_value="-r 300 -m 2 -s 5 \
-  --avoid 'Xorg|gnome-shell|systemd|sshd|sway|wayland|plasmashell|kwin_x11|kwin_wayland|code|vscode' \
-  --prefer 'chrome|chromium|firefox|brave|msedge|cargo|rustc|node|npm|yarn|pnpm|java|python3?|jupyter.*|cursor|slack|discord|teams|zoom' \
-  --ignore-root-user -p"
-        fi
-    fi
-
-    earlyoom_args_escaped=$(printf '%q' "$earlyoom_args_value")
-
-    if maybe_dry_run "Would write /etc/default/earlyoom with EARLYOOM_ARGS"; then
-        :
-    else
-        sudo tee /etc/default/earlyoom >/dev/null <<EOF
-# Generated by system_resource_protection_script
-# -r 300 : log every 5 minutes
-# -m 2   : act when free memory < 2%
-# -s 5   : act when free swap < 5%
-#   -p                 : keep earlyoom itself highly prioritized
-#   --ignore-root-user : avoid killing root-owned system services
-$earlyoom_args_comment
-EARLYOOM_ARGS=$earlyoom_args_escaped
-EOF
-    fi
-
-    if [ "$HAS_SYSTEMD" -eq 1 ]; then
-        print_info "Enabling and restarting earlyoom..."
-        if maybe_dry_run "Would systemctl enable --now earlyoom"; then
-            :
-        else
-            if sudo systemctl enable --now earlyoom >/dev/null 2>&1; then
-                print_success "earlyoom is active and protecting against OOM freezes"
-            else
-                print_warning "Failed to enable/start earlyoom; check with: sudo systemctl status earlyoom"
-            fi
-        fi
-    else
-        print_warning "Systemd not detected; you may need to start earlyoom manually."
-    fi
-}
-
-# --------------- Step 4: Sysctl Tweaks -----------------------
+# --------------- Step 3: Sysctl Tweaks -----------------------
 configure_sysctl() {
-    print_step "[4/${TOTAL_STEPS}] Applying kernel (sysctl) responsiveness tweaks"
+    print_step "[3/${TOTAL_STEPS}] Applying kernel (sysctl) responsiveness tweaks"
 
     if [ "$ENABLE_SYSCTL" -ne 1 ]; then
         print_warning "Sysctl tweaks skipped by configuration."
@@ -679,9 +575,9 @@ EOF
     fi
 }
 
-# --------------- Step 5: WSL2 / systemd Limits ---------------
+# --------------- Step 4: WSL2 / systemd Limits ---------------
 configure_wsl_limits() {
-    print_step "[5/${TOTAL_STEPS}] Configuring WSL2/systemd default limits (if applicable)"
+    print_step "[4/${TOTAL_STEPS}] Configuring WSL2/systemd default limits (if applicable)"
 
     if [ "$ENABLE_WSL_LIMITS" -ne 1 ]; then
         print_warning "WSL/systemd limits skipped by configuration."
@@ -739,9 +635,9 @@ EOF
     fi
 }
 
-# --------------- Step 6: Monitoring & Utilities --------------
+# --------------- Step 5: Monitoring & Utilities --------------
 create_monitoring_and_tools() {
-    print_step "[6/${TOTAL_STEPS}] Creating monitoring tools and helpers"
+    print_step "[5/${TOTAL_STEPS}] Creating monitoring tools and helpers"
 
     if [ "$ENABLE_TOOLS" -ne 1 ]; then
         print_warning "Monitoring tools skipped by configuration."
@@ -1495,13 +1391,11 @@ if [ "${SRPS_JSON:-0}" = "1" ]; then
   "services": {
     "systemd_oomd": $(j_active systemd-oomd.service),
     "gamemoded": $(j_active gamemoded.service),
-    "ananicy_cpp": $(j_active ananicy-cpp),
-    "earlyoom": $(j_active earlyoom)
+    "ananicy_cpp": $(j_active ananicy-cpp)
   },
   "ananicy_errors": $an_errs,
   "user_systemd": $( { systemctl --user show-environment >/dev/null 2>&1 && echo true; } || echo false ),
   "configs": {
-    "earlyoom": $(j_file /etc/default/earlyoom),
     "ananicy_rules": $(j_file /etc/ananicy.d/00-default/99-system-resource-protection.rules),
     "sysctl": $(j_file /etc/sysctl.d/99-system-resource-protection.conf)
   },
@@ -1533,7 +1427,6 @@ status_line() {
 status_line systemd-oomd.service "systemd-oomd" warn
 status_line gamemoded.service "gamemoded" warn
 status_line ananicy-cpp "ananicy-cpp" warn
-status_line earlyoom "earlyoom" warn
 
 section "systemd user session"
 if systemctl --user show-environment >/dev/null 2>&1; then
@@ -1543,7 +1436,6 @@ else
 fi
 
 section "config files"
-if [ -f /etc/default/earlyoom ]; then echo "earlyoom config present"; else echo "⚠ /etc/default/earlyoom missing"; fi
 if [ -f /etc/ananicy.d/00-default/99-system-resource-protection.rules ]; then echo "SRPS ananicy rules present"; else echo "⚠ SRPS ananicy rules missing"; fi
 if [ -f /etc/sysctl.d/99-system-resource-protection.conf ]; then echo "sysctl config present"; else echo "sysctl config missing"; fi
 
@@ -1571,7 +1463,6 @@ section "recent errors"
 journalctl -p err -b -n 20 --no-pager 2>/dev/null || true
 
 section "recommendations"
-echo "- Disable one of systemd-oomd/earlyoom if both active"
 echo "- Disable gamemoded if scheduling conflicts appear"
 echo "- Ensure systemd user session is running for limited* aliases"
 EOF
@@ -1672,7 +1563,6 @@ mem=$(free -h)
 topcpu=$(ps aux --sort=-%cpu | head -5)
 topmem=$(ps aux --sort=-%mem | head -5)
 status=$(systemctl is-active ananicy-cpp 2>/dev/null || true)
-status2=$(systemctl is-active earlyoom 2>/dev/null || true)
 
 if [ "${1:-}" = "--help" ]; then
   cat <<'USAGE'
@@ -1686,8 +1576,7 @@ cat > "$out" <<HTML
 <h1 style="font-family: sans-serif; color:#4c6ef5;">SRPS Snapshot</h1>
 <h2>System</h2><pre>$load</pre>
 <h2>Memory</h2><pre>$mem</pre>
-<h2>Services</h2><pre>ananicy-cpp: $status
-earlyoom: $status2</pre>
+<h2>Services</h2><pre>ananicy-cpp: $status</pre>
 <h2>Top CPU</h2><pre>$topcpu</pre>
 <h2>Top MEM</h2><pre>$topmem</pre>
 </body></html>
@@ -1711,18 +1600,6 @@ complete -W "srps-doctor srps-reload-rules srps-pull-rules srps-report sysmon ch
 EOF
 
     print_info "Bash completions installed at $completion_file"
-
-    # --- WSL helper note -------------------------------------
-    if [ "$IS_WSL" -eq 1 ]; then
-        local wsl_helper="/usr/local/share/srps-wsl-earlyoom.ps1"
-        sudo tee "$wsl_helper" >/dev/null << 'EOF'
-# Run from an elevated PowerShell prompt to kick earlyoom inside WSL
-$distro = wsl.exe -l -q | Select-Object -First 1
-$cmd = "wsl.exe -d $distro sh -c 'sudo systemctl start earlyoom'"
-Start-Process -WindowStyle Hidden -Verb RunAs -FilePath powershell -ArgumentList $cmd
-EOF
-        print_info "WSL PowerShell helper written to $wsl_helper (run elevated in Windows to start earlyoom)"
-    fi
 
     print_success "Monitoring and helper tools installed (sysmon, check-throttled, cursor-guard, kill-cursor, srps-doctor, srps-reload-rules${ENABLE_RULE_PULL:+, srps-pull-rules}${ENABLE_HTML_REPORT:+, srps-report})"
 }
@@ -1829,21 +1706,14 @@ show_final_summary_install() {
     echo -e "\n${CYAN}${BOLD}Service status summary:${NC}"
 
     if [ "$HAS_SYSTEMD" -eq 1 ]; then
-        local ananicy_status earlyoom_status
+        local ananicy_status
         if systemctl is-active --quiet ananicy-cpp; then
             ananicy_status="${GREEN}active${NC}"
         else
             ananicy_status="${RED}inactive${NC}"
         fi
 
-        if systemctl is-active --quiet earlyoom; then
-            earlyoom_status="${GREEN}active${NC}"
-        else
-            earlyoom_status="${RED}inactive${NC}"
-        fi
-
         echo -e "  ananicy-cpp:   $ananicy_status"
-        echo -e "  earlyoom:      $earlyoom_status"
     else
         echo -e "  ${YELLOW}Systemd not detected; service status unknown.${NC}"
     fi
@@ -1880,8 +1750,6 @@ sample_service_logs() {
     if [ "$HAS_SYSTEMD" -eq 1 ]; then
         print_info "Recent ananicy-cpp log tail:"
         sudo journalctl -u ananicy-cpp -n 10 --no-pager 2>/dev/null || true
-        print_info "Recent earlyoom log tail:"
-        sudo journalctl -u earlyoom -n 10 --no-pager 2>/dev/null || true
     fi
 }
 
@@ -1922,10 +1790,6 @@ uninstall_monitoring_tools() {
         sudo rm -f /etc/bash_completion.d/srps
     fi
 
-    if sudo test -f /usr/local/share/srps-wsl-earlyoom.ps1 2>/dev/null; then
-        print_info "Removing WSL helper script /usr/local/share/srps-wsl-earlyoom.ps1"
-        sudo rm -f /usr/local/share/srps-wsl-earlyoom.ps1
-    fi
 }
 
 uninstall_ananicy_config() {
@@ -1961,23 +1825,9 @@ uninstall_ananicy_config() {
     fi
 }
 
-uninstall_earlyoom_and_sysctl() {
-    print_step "[3/4] Reverting EarlyOOM and sysctl configuration"
+uninstall_sysctl_config() {
+    print_step "[3/4] Reverting sysctl configuration"
 
-    # EarlyOOM config
-    if sudo test -f /etc/default/earlyoom.srps-backup 2>/dev/null; then
-        print_info "Restoring /etc/default/earlyoom from SRPS backup"
-        sudo mv /etc/default/earlyoom.srps-backup /etc/default/earlyoom
-        print_success "Restored previous EarlyOOM configuration"
-    elif sudo test -f /etc/default/earlyoom 2>/dev/null && sudo grep -q "system_resource_protection_script" /etc/default/earlyoom 2>/dev/null; then
-        print_info "Removing SRPS-generated /etc/default/earlyoom (no backup found)"
-        sudo rm -f /etc/default/earlyoom
-        print_success "Removed SRPS EarlyOOM configuration"
-    else
-        print_info "No SRPS-managed EarlyOOM configuration detected."
-    fi
-
-    # Sysctl config
     local sysctl_file="/etc/sysctl.d/99-system-resource-protection.conf"
     if sudo test -f "${sysctl_file}.srps-backup" 2>/dev/null; then
         print_info "Restoring $sysctl_file from backup"
@@ -2028,10 +1878,7 @@ show_final_summary_uninstall() {
     echo -e   "╚════════════════════════════════════════════════════════════╝${NC}"
 
     echo -e "\n${YELLOW}${BOLD}Notes:${NC}"
-    echo -e "  • Packages (ananicy-cpp, earlyoom) were NOT removed; only config and helpers."
-    echo -e "  • If you want them gone entirely:"
-    echo -e "      ${CYAN}sudo apt-get remove --purge earlyoom${NC}"
-    echo -e "      ${CYAN}sudo rm /usr/local/bin/ananicy-cpp  # if built from source${NC}"
+    echo -e "  • Packages (ananicy-cpp) were NOT removed; only config and helpers."
     echo -e "  • Restart your shell to ensure aliases/functions are gone.\n"
 }
 
@@ -2057,7 +1904,6 @@ main_install() {
 
     install_ananicy_cpp
     configure_ananicy_rules
-    install_and_configure_earlyoom
     configure_sysctl
     configure_wsl_limits
     create_monitoring_and_tools
@@ -2082,7 +1928,7 @@ main_uninstall() {
 
     uninstall_monitoring_tools
     uninstall_ananicy_config
-    uninstall_earlyoom_and_sysctl
+    uninstall_sysctl_config
     uninstall_systemd_limits
     uninstall_shell_snippets
     show_final_summary_uninstall
