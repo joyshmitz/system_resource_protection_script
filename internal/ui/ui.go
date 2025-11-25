@@ -71,6 +71,7 @@ type Model struct {
 	ctxCancel context.CancelFunc
 	width     int
 	height    int
+	topOffset int
 
 	sortKey   string
 	filter    string
@@ -133,6 +134,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.clampTopOffset()
 	case tea.KeyMsg:
 		if m.inputMode {
 			switch msg.Type {
@@ -140,6 +142,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filter = strings.TrimSpace(string(m.inputBuf))
 				m.inputMode = false
 				m.inputBuf = nil
+				m.topOffset = 0
 				return m, nil
 			case tea.KeyEsc:
 				m.inputMode = false
@@ -171,6 +174,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.sortKey = "cpu"
 			}
+			m.topOffset = 0
 		case "g":
 			m.showGPU = !m.showGPU
 			m.statusMsg = fmt.Sprintf("GPU panels %s", onOff(m.showGPU))
@@ -193,12 +197,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			m.inputMode = true
 			m.inputBuf = nil
+			m.topOffset = 0
 		case "o":
 			if m.jsonFile != "" {
 				m.jsonFile = ""
 			} else if f := os.Getenv("SRPS_SYSMON_JSON_FILE"); f != "" {
 				m.jsonFile = f
 			}
+		case "down", "j":
+			m.bumpTopOffset(1)
+		case "up", "k":
+			m.bumpTopOffset(-1)
+		case "pgdown", "J":
+			m.bumpTopOffset(m.visibleTopPage())
+		case "pgup", "K":
+			m.bumpTopOffset(-m.visibleTopPage())
+		case "end":
+			m.jumpTopEnd()
+		case "home":
+			m.topOffset = 0
 		}
 	case tickMsg:
 		if m.paused {
@@ -211,6 +228,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.recordHistory(samp)
 				m.updateStats(samp)
 				m.maybeWriteJSON(samp)
+				m.clampTopOffset()
 			}
 		default:
 		}
@@ -427,12 +445,12 @@ func (m *Model) renderDashboard(s model.Sample) string {
 			if m.width > 170 {
 				cols = 3
 			}
-			procAreaWidth := (m.width * 2) / 3
+			procAreaWidth := (m.width * 3) / 4
 			if procAreaWidth < 70 {
 				procAreaWidth = 70
 			}
 
-			procTable := renderProcessColumns(m.sortAndFilter(s.Top), cols, availHeight, procAreaWidth-4, primaryColor)
+			procTable := renderProcessColumns(m.sortAndFilter(s.Top), cols, availHeight, procAreaWidth-4, m.topOffset, primaryColor)
 			procCard := cardStyle.Width(procAreaWidth).Height(availHeight).
 				Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("TOP PROCESSES"), procTable))
 
@@ -449,12 +467,12 @@ func (m *Model) renderDashboard(s model.Sample) string {
 			fdHeight := maxInt(4, availHeight/4)
 			coreWidth := minInt(32, rightWidth-6)
 
-			throttledTable := renderProcessTable(m.sortAndFilter(s.Throttled), thHeight, secondaryColor)
+			throttledTable := renderProcessTable(m.sortAndFilter(s.Throttled), thHeight, 0, secondaryColor)
 			ioLeaders := ""
 			fdLeaders := ""
 			if m.showIOPanels {
-				ioLeaders = renderProcessTable(m.topIO(s.Top), ioHeight, warningColor)
-				fdLeaders = renderProcessTable(m.topFD(s.Top), fdHeight, warningColor)
+				ioLeaders = renderProcessTable(m.topIO(s.Top), ioHeight, 0, warningColor)
+				fdLeaders = renderProcessTable(m.topFD(s.Top), fdHeight, 0, warningColor)
 			}
 			coreBlock := renderCoreGrid(m.perCoreHist, coreWidth)
 
@@ -479,15 +497,15 @@ func (m *Model) renderDashboard(s model.Sample) string {
 		}
 
 		// Narrow screens: fall back to single column
-		procTable := renderProcessTable(m.sortAndFilter(s.Top), availHeight, primaryColor)
+		procTable := renderProcessTable(m.sortAndFilter(s.Top), availHeight, m.topOffset, primaryColor)
 		procCard := cardStyle.Width(55).Height(availHeight).Render(lipgloss.JoinVertical(lipgloss.Left, labelStyle.Render("TOP PROCESSES"), procTable))
 
-		throttledTable := renderProcessTable(m.sortAndFilter(s.Throttled), 5, secondaryColor)
+		throttledTable := renderProcessTable(m.sortAndFilter(s.Throttled), 5, 0, secondaryColor)
 		coreBlock := renderCoreGrid(m.perCoreHist, 25)
 		var ioLeaders, fdLeaders string
 		if m.showIOPanels {
-			ioLeaders = renderProcessTable(m.topIO(s.Top), 6, warningColor)
-			fdLeaders = renderProcessTable(m.topFD(s.Top), 6, warningColor)
+			ioLeaders = renderProcessTable(m.topIO(s.Top), 6, 0, warningColor)
+			fdLeaders = renderProcessTable(m.topFD(s.Top), 6, 0, warningColor)
 		}
 
 		rightColContent := lipgloss.JoinVertical(lipgloss.Left,
@@ -603,6 +621,7 @@ func (m *Model) renderHelp() string {
 		"  q / Ctrl+C     Quit",
 		"  tab            Toggle Dashboard / Analysis",
 		"  s              Toggle sort CPU/MEM",
+		"  j/k, PgUp/Dn   Scroll Top list (Home/End to jump)",
 		"  /              Filter by substring (enter to apply, esc to cancel)",
 		"  h or ?         Toggle this help",
 		"  g / b / i      Toggle GPU / Battery / IO panels",
@@ -755,8 +774,15 @@ func renderSparklinePct(values []float64, width int, color string) string {
 	return style.Render(b.String())
 }
 
-func renderProcessTable(procs []model.Process, height int, highlightColor string) string {
+func renderProcessTable(procs []model.Process, height int, offset int, highlightColor string) string {
 	var b strings.Builder
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(procs) {
+		offset = len(procs)
+	}
+	procs = procs[offset:]
 
 	// Header
 	fmt.Fprintf(&b, "%-18s %6s %4s %6s %6s %6s %6s %5s\n", "COMMAND", "PID", "NI", "CPU%", "MEM%", "Rk/s", "Wk/s", "FDs")
@@ -788,7 +814,7 @@ func renderProcessTable(procs []model.Process, height int, highlightColor string
 }
 
 // renderProcessColumns splits the process table into multiple narrow columns to avoid tall lists.
-func renderProcessColumns(procs []model.Process, columns, height, totalWidth int, highlightColor string) string {
+func renderProcessColumns(procs []model.Process, columns, height, totalWidth int, offset int, highlightColor string) string {
 	if columns < 1 {
 		columns = 1
 	}
@@ -799,6 +825,13 @@ func renderProcessColumns(procs []model.Process, columns, height, totalWidth int
 	if maxRows < 1 {
 		maxRows = 1
 	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(procs) {
+		offset = len(procs)
+	}
+	procs = procs[offset:]
 	if totalWidth < columns {
 		totalWidth = columns
 	}
@@ -879,6 +912,69 @@ func renderCoreGrid(hist map[int][]float64, width int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// --- Scrolling helpers for the Top table ---
+
+func (m *Model) topLayout() (columns int, maxRows int) {
+	availHeight := m.height - 14
+	if availHeight < 6 {
+		availHeight = 6
+	}
+	columns = 1
+	if m.width >= 110 {
+		columns = 2
+		if m.width > 170 {
+			columns = 3
+		}
+	}
+	maxRows = availHeight - 1
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	return
+}
+
+func (m *Model) visibleTopCapacity() int {
+	cols, rows := m.topLayout()
+	return maxInt(1, cols*rows)
+}
+
+func (m *Model) maxTopOffset() int {
+	total := len(m.sortAndFilter(m.latest.Top))
+	capacity := m.visibleTopCapacity()
+	maxOff := total - capacity
+	if maxOff < 0 {
+		return 0
+	}
+	return maxOff
+}
+
+func (m *Model) clampTopOffset() {
+	maxOff := m.maxTopOffset()
+	if m.topOffset > maxOff {
+		m.topOffset = maxOff
+	}
+	if m.topOffset < 0 {
+		m.topOffset = 0
+	}
+}
+
+func (m *Model) bumpTopOffset(delta int) {
+	m.topOffset += delta
+	m.clampTopOffset()
+}
+
+func (m *Model) visibleTopPage() int {
+	_, rows := m.topLayout()
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+func (m *Model) jumpTopEnd() {
+	m.topOffset = m.maxTopOffset()
 }
 
 // --- Utility ---
