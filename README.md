@@ -121,7 +121,7 @@ Key UI features:
 - Battery pill (sysfs/upower).
 - Top tables: sortable (CPU/MEM) via `s`, filter with `/` (regex substring), throttled (NI>0), cgroup CPU summary.
 - Per-core sparklines (history ring).
-- JSON/NDJSON export toggle (`o` when `SRPS_SYSMON_JSON_FILE` set).
+- JSON/NDJSON export toggle (`o` when `SRPS_SYSMONI_JSON_FILE` set; legacy `SRPS_SYSMON_JSON_FILE` still honored).
 - Quit with `q` / `Ctrl+C`. Runs in alt-screen for a polished, flicker-free experience.
 
 Non-TTY: auto emits JSON one-shot. `--json` / `--json-stream` also available.
