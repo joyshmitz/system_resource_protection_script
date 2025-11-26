@@ -682,7 +682,6 @@ Env flags:
   SRPS_SYSMONI_ADAPTIVE      1=double interval when not on a TTY
   SRPS_SYSMONI_GPU           0 to skip GPU queries (default 1)
   SRPS_SYSMONI_BATT          0 to skip battery query (default 1)
-  (Legacy env names SRPS_SYSMON_* are still honored.)
 Flags:
   --json                     Shortcut for SRPS_SYSMONI_JSON=1 one-shot snapshot
 USAGE
@@ -694,18 +693,18 @@ if [ "${1:-}" = "--json" ]; then
   shift || true
 fi
 
-interval=${SRPS_SYSMONI_INTERVAL:-${SRPS_SYSMON_INTERVAL:-1}}
+interval=${SRPS_SYSMONI_INTERVAL:-1}
 rows=$(tput lines 2>/dev/null || echo 24)
 cols=$(tput cols 2>/dev/null || echo 80)
 bar_width=$((cols/3)); [ "$bar_width" -lt 12 ] && bar_width=12
-percore=${SRPS_SYSMONI_PERCORE:-${SRPS_SYSMON_PERCORE:-1}}
-focus_re="${SRPS_SYSMONI_FOCUS:-${SRPS_SYSMON_FOCUS:-}}"
-json_mode=${SRPS_SYSMONI_JSON:-${SRPS_SYSMON_JSON:-0}}
-json_stream=${SRPS_SYSMONI_JSON_STREAM:-${SRPS_SYSMON_JSON_STREAM:-0}}
-adaptive=${SRPS_SYSMONI_ADAPTIVE:-${SRPS_SYSMON_ADAPTIVE:-0}}
-json_file=${SRPS_SYSMONI_JSON_FILE:-${SRPS_SYSMON_JSON_FILE:-}}
-enable_gpu=${SRPS_SYSMONI_GPU:-${SRPS_SYSMON_GPU:-1}}
-enable_batt=${SRPS_SYSMONI_BATT:-${SRPS_SYSMON_BATT:-1}}
+percore=${SRPS_SYSMONI_PERCORE:-1}
+focus_re="${SRPS_SYSMONI_FOCUS:-}"
+json_mode=${SRPS_SYSMONI_JSON:-0}
+json_stream=${SRPS_SYSMONI_JSON_STREAM:-0}
+adaptive=${SRPS_SYSMONI_ADAPTIVE:-0}
+json_file=${SRPS_SYSMONI_JSON_FILE:-}
+enable_gpu=${SRPS_SYSMONI_GPU:-1}
+enable_batt=${SRPS_SYSMONI_BATT:-1}
 
 if [ "$json_stream" = "1" ] && [ "$json_mode" = "0" ]; then json_mode=1; fi
 [ -n "$json_file" ] && json_mode=1
@@ -1042,7 +1041,7 @@ EOF
 # --- sysmoni -----------------------------------------------
     local sysmon="/usr/local/bin/sysmoni"
     local sysmon_go="/usr/local/bin/sysmoni-go"
-    local ref="${SRPS_SYSMONI_REF:-${SRPS_SYSMON_REF:-main}}"
+    local ref="${SRPS_SYSMONI_REF:-main}"
 
     install_sysmon_go(){
         local build_ref="$1"
