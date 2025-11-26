@@ -6,15 +6,15 @@ import (
 	"time"
 )
 
-// Config carries runtime options for sysmon.
+// Config carries runtime options for sysmoni.
 type Config struct {
-	Interval    time.Duration
-	Sort        string
-	Filter      string
-	JSON        bool
-	JSONStream  bool
-	EnableGPU   bool
-	EnableBatt  bool
+	Interval   time.Duration
+	Sort       string
+	Filter     string
+	JSON       bool
+	JSONStream bool
+	EnableGPU  bool
+	EnableBatt bool
 }
 
 func Default() Config {
@@ -32,7 +32,7 @@ func Default() Config {
 // FromFlags parses flags and environment overrides.
 func FromFlags(args []string) Config {
 	cfg := Default()
-	fs := flag.NewFlagSet("sysmon", flag.ContinueOnError)
+	fs := flag.NewFlagSet("sysmoni", flag.ContinueOnError)
 	fs.DurationVar(&cfg.Interval, "interval", cfg.Interval, "refresh interval")
 	fs.StringVar(&cfg.Sort, "sort", cfg.Sort, "sort column: cpu|mem")
 	fs.StringVar(&cfg.Filter, "filter", cfg.Filter, "regex filter for process names")
@@ -42,18 +42,28 @@ func FromFlags(args []string) Config {
 	fs.BoolVar(&cfg.EnableBatt, "battery", cfg.EnableBatt, "enable battery sampling")
 	_ = fs.Parse(args)
 
-	if v := os.Getenv("SRPS_SYSMON_INTERVAL"); v != "" {
-		// Legacy env expects bare seconds; if user supplies a duration string, honor it.
+	// Prefer new env names, fall back to legacy SRPS_SYSMON_* for compatibility
+	if v := os.Getenv("SRPS_SYSMONI_INTERVAL"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.Interval = parsed
+		} else if parsed, err2 := time.ParseDuration(v + "s"); err2 == nil {
+			cfg.Interval = parsed
+		}
+	} else if v := os.Getenv("SRPS_SYSMON_INTERVAL"); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil {
 			cfg.Interval = parsed
 		} else if parsed, err2 := time.ParseDuration(v + "s"); err2 == nil {
 			cfg.Interval = parsed
 		}
 	}
-	if v := os.Getenv("SRPS_SYSMON_GPU"); v == "0" {
+	if v := os.Getenv("SRPS_SYSMONI_GPU"); v == "0" {
+		cfg.EnableGPU = false
+	} else if v := os.Getenv("SRPS_SYSMON_GPU"); v == "0" {
 		cfg.EnableGPU = false
 	}
-	if v := os.Getenv("SRPS_SYSMON_BATT"); v == "0" {
+	if v := os.Getenv("SRPS_SYSMONI_BATT"); v == "0" {
+		cfg.EnableBatt = false
+	} else if v := os.Getenv("SRPS_SYSMON_BATT"); v == "0" {
 		cfg.EnableBatt = false
 	}
 	return cfg

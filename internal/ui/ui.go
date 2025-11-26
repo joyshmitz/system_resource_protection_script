@@ -196,7 +196,12 @@ func New(cfg config.Config) *Model {
 		mouseEnabled:  true,
 		selectedProc:  -1,
 		focusedPanel:  0,
-		jsonFile:      os.Getenv("SRPS_SYSMON_JSON_FILE"),
+		jsonFile: func() string {
+			if v := os.Getenv("SRPS_SYSMONI_JSON_FILE"); v != "" {
+				return v
+			}
+			return os.Getenv("SRPS_SYSMON_JSON_FILE")
+		}(),
 	}
 }
 
@@ -344,6 +349,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.jsonFile != "" {
 				m.jsonFile = ""
 				m.statusMsg = "JSON output disabled"
+			} else if f := os.Getenv("SRPS_SYSMONI_JSON_FILE"); f != "" {
+				m.jsonFile = f
+				m.statusMsg = fmt.Sprintf("JSON output: %s", f)
 			} else if f := os.Getenv("SRPS_SYSMON_JSON_FILE"); f != "" {
 				m.jsonFile = f
 				m.statusMsg = fmt.Sprintf("JSON output: %s", f)
@@ -1075,7 +1083,7 @@ func (m *Model) renderHelp() string {
 	// Use titleStyle for main header
 	borderTop := "╔═══════════════════════════════════════════════════════════╗"
 	borderBottom := "╚═══════════════════════════════════════════════════════════╝"
-	title := titleStyle.Render("SYSMON - SYSTEM RESOURCE MONITOR")
+	title := titleStyle.Render("SYSMONI - SYSTEM RESOURCE MONITOR")
 	innerWidth := lipgloss.Width(borderTop) - 2 // subtract side borders
 	padding := innerWidth - lipgloss.Width(title)
 	if padding < 0 {
@@ -1119,7 +1127,7 @@ func (m *Model) renderHelp() string {
 	b.WriteString(keyStyle.Render("  f") + descStyle.Render("             Freeze/unfreeze updates") + "\n")
 	b.WriteString(keyStyle.Render("  m") + descStyle.Render("             Toggle mouse support") + "\n")
 	b.WriteString(keyStyle.Render("  I") + descStyle.Render("             Show ionice tip for top process") + "\n")
-	b.WriteString(keyStyle.Render("  o") + descStyle.Render("             Toggle JSON output (SRPS_SYSMON_JSON_FILE)") + "\n")
+	b.WriteString(keyStyle.Render("  o") + descStyle.Render("             Toggle JSON output (SRPS_SYSMONI_JSON_FILE)") + "\n")
 	b.WriteString(keyStyle.Render("  ?/h") + descStyle.Render("           Toggle this help") + "\n")
 
 	b.WriteString(sectionStyle.Render("🖱️  MOUSE SUPPORT") + "\n")

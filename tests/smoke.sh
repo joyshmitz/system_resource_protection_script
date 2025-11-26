@@ -14,7 +14,7 @@ marker, out = sys.argv[1], sys.argv[2]
 text = pathlib.Path("install.sh").read_text()
 
 # Robust extraction:
-# 1. If marker is a function name (e.g. "install_bash_sysmon"), find that function and extract the first heredoc <<'EOF' inside it.
+# 1. If marker is a function name (e.g. "install_bash_sysmoni"), find that function and extract the first heredoc <<'EOF' inside it.
 # 2. Otherwise, treat marker as the exact line preceding the heredoc.
 
 if "install_" in marker or "_doctor" in marker or "_reload" in marker:
@@ -43,7 +43,7 @@ PY
   chmod +x "$outfile"
 }
 
-extract "install_bash_sysmon(){" "$tmpdir/sysmon"
+extract "install_bash_sysmoni(){" "$tmpdir/sysmoni"
 extract "sudo tee \"\$check_throttled\" >/dev/null" "$tmpdir/check-throttled"
 extract "sudo tee \"\$cursor_guard\" >/dev/null" "$tmpdir/cursor-guard"
 extract "sudo tee \"\$srps_doctor\" >/dev/null" "$tmpdir/srps-doctor"
@@ -66,11 +66,11 @@ fi
 echo "[smoke] bash -n install.sh"
 bash -n install.sh
 
-echo "[smoke] sysmon JSON snapshot"
-SRPS_SYSMON_JSON=1 SRPS_SYSMON_INTERVAL=0.1 ./install.sh --plan >/tmp/srps-plan.log || true
-SRPS_SYSMON_JSON=1 SRPS_SYSMON_GPU=0 SRPS_SYSMON_BATT=0 SRPS_SYSMON_INTERVAL=0.1 "$tmpdir/sysmon" >/tmp/sysmon.json
+echo "[smoke] sysmoni JSON snapshot"
+SRPS_SYSMONI_JSON=1 SRPS_SYSMONI_INTERVAL=0.1 ./install.sh --plan >/tmp/srps-plan.log || true
+SRPS_SYSMONI_JSON=1 SRPS_SYSMONI_GPU=0 SRPS_SYSMONI_BATT=0 SRPS_SYSMONI_INTERVAL=0.1 "$tmpdir/sysmoni" >/tmp/sysmon.json
 if ! python3 -c "import json; json.load(open('/tmp/sysmon.json'))"; then
-    echo "FATAL: sysmon produced invalid JSON:"
+    echo "FATAL: sysmoni produced invalid JSON:"
     cat /tmp/sysmon.json
     exit 1
 fi
@@ -78,11 +78,11 @@ python3 - <<'PY'
 import json, sys
 data = json.load(open('/tmp/sysmon.json'))
 if not data.get("top"):
-    print("WARNING: sysmon JSON top list is empty (acceptable in some CI envs)")
+    print("WARNING: sysmoni JSON top list is empty (acceptable in some CI envs)")
 else:
-    print("[check] sysmon JSON top list populated")
-assert "cpu" in data and "mem" in data, "sysmon JSON missing cpu/mem keys"
-print("[check] sysmon JSON sanity OK")
+    print("[check] sysmoni JSON top list populated")
+assert "cpu" in data and "mem" in data, "sysmoni JSON missing cpu/mem keys"
+print("[check] sysmoni JSON sanity OK")
 PY
 
 echo "[smoke] check-throttled JSON"
