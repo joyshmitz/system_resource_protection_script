@@ -1703,8 +1703,14 @@ if command -v check-throttled >/dev/null 2>&1; then
 fi
 
 # Rust / Cargo env
-export TMPDIR=/tmp
-export CARGO_TARGET_DIR=/tmp/cargo-target
+# TMPDIR and CARGO_TARGET_DIR live on /data (separate NVMe with
+# compress=zstd:1,noatime) rather than /tmp. /tmp is tmpfs on many fleet
+# hosts and tmpfs eats RAM under agent build load; the btrfs root disk
+# also pins btrfs_inode/dentry slab for hours under cargo target dir
+# write amplification. /etc/environment and /etc/profile.d/fleet-env.sh
+# set these to /data/tmp; do not regress them here.
+export TMPDIR=/data/tmp
+export CARGO_TARGET_DIR=/data/tmp/cargo-target
 # <<< system_resource_protection_script <<<
 EOF
 
