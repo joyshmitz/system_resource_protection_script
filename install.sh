@@ -498,6 +498,21 @@ configure_ananicy_rules() {
 {"name": "rg","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "ag","nice": 5,"sched": "other","ioclass": "best-effort"}
 {"name": "ripgrep","nice": 5,"sched": "other","ioclass": "best-effort"}
+
+# --- Interactive remote-dev transport & agent CLIs: NEVER deprioritize ---
+# Bundled CachyOS rules (00-default, sorted before this file) classify sshd,
+# sshd-session, ssh-agent and bun as BG_CPUIO (nice 16, SCHED_IDLE). On a
+# headless box that starves remote Codex/agent sessions whose process tree is
+# sshd-session -> sh -> bun -> codex, manifesting as multi-second input freezes.
+# These overrides win by sort order and keep the interactive path responsive.
+# (Note: `node` above is intentionally batched at nice 5; `bun` is the agent
+# launcher and must stay interactive, so it is pinned here, not batched.)
+{"name": "sshd","nice": 0,"sched": "other","ioclass": "best-effort"}
+{"name": "sshd-session","nice": 0,"sched": "other","ioclass": "best-effort"}
+{"name": "ssh-agent","nice": 0,"sched": "other","ioclass": "best-effort"}
+{"name": "mosh-server","nice": 0,"sched": "other","ioclass": "best-effort"}
+{"name": "bun","nice": 0,"sched": "other","ioclass": "best-effort"}
+{"name": "codex","nice": 0,"sched": "other","ioclass": "best-effort"}
 EOF
 
     printf '%s\n' "${backup_dir}" | sudo tee /etc/ananicy.d/.srps_backup >/dev/null
@@ -1555,6 +1570,12 @@ sudo mkdir -p /etc/ananicy.d
 sudo cp -a "$tmpdir/ananicy-rules"/* /etc/ananicy.d/
 if [ -d "$backup/10-local" ]; then
   sudo cp -a "$backup/10-local" /etc/ananicy.d/ || true
+fi
+# Re-emit the SRPS override too — a bare CachyOS refresh re-classifies sshd /
+# bun / agent CLIs as BG_CPUIO and would re-freeze remote sessions otherwise.
+if [ -f "$backup/00-default/99-system-resource-protection.rules" ]; then
+  sudo mkdir -p /etc/ananicy.d/00-default
+  sudo cp -a "$backup/00-default/99-system-resource-protection.rules" /etc/ananicy.d/00-default/ || true
 fi
 echo "$(c 2)Rules refreshed$(r) | backup: $backup"
 EOF
