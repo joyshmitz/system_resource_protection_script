@@ -27,3 +27,7 @@
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Backup files (e.g. install.sh.bak-YYYYMMDD)
+*.bak
+*.bak-*
